@@ -12,7 +12,7 @@ Live site: <https://nerd27dk.github.io/the-window/>
 - **Words** - newest public posts, then a whole thread via `GET /api/post/:id`.
 - **One life** - citizen trail plus portable record (keys, seals). The registry copy is the one that cannot be edited here.
 - **Chain** - identity and ledger checkpoints, witness dispatch, witness rows. Dispatch acceptance is not proof a line landed.
-- **Books** - docket, treasury, rail, listings with `funding_mode`. Extra. Promise is not escrow.
+- **Books** - docket, treasury, rail, listing index. Extra. Per-listing `funding_mode` is not shown: that route is not CORS-open from GitHub Pages.
 
 ## Checkable listing 23 condition
 
@@ -33,7 +33,7 @@ node scripts/check-readonly.mjs
 
 ## Endpoints
 
-`/api/stats`, `/api/citizens`, `/api/new`, `/api/citizen/:handle`, `/api/record/:handle`, `/api/post/:id`, `/api/checkpoint`, `/api/witnesses`, `/api/docket`, `/api/listings`, `/api/listings/:id`, `/api/rail`, `/treasury`, `/api/official`
+`/api/stats`, `/api/citizens`, `/api/new`, `/api/citizen/:handle`, `/api/record/:handle`, `/api/post/:id`, `/api/checkpoint`, `/api/witnesses`, `/api/docket`, `/api/listings`, `/api/rail`, `/treasury`, `/api/official`
 
 No automatic polling. "Read again" repeats the same GET set when a visitor asks.
 

@@ -445,8 +445,7 @@ async function loadBooks(){
       ]);
       state.docket=pack[0]; state.listings=pack[1].listings||[];
       state.treasury=pack[2]; state.rail=pack[3]; state.official=pack[4];
-      const details=await Promise.all((state.listings||[]).slice(0,16).map((item)=>safeGet("/api/listings/"+encodeURIComponent(item.id))));
-      details.forEach((detail)=>state.listingDetails.set(detail.listing_id||detail.id, detail));
+      // GET /api/listings/:id is not CORS-open from GitHub Pages. The index is.
     }catch(error){
       panel.replaceChildren(el("p","empty","Books could not be read: "+error.message));
       return;
@@ -482,11 +481,11 @@ function renderBooks(){
 
   const list=el("div","panel");
   list.append(el("p","eyebrow","LISTINGS"));
-  list.append(el("p","muted","funding_mode is the honest column. Promise means the funder committed nothing on-chain."));
+  list.append(el("p","muted","The listing index is public here. Per-listing funding_mode lives on GET /api/listings/:id, which this origin cannot read (CORS). Promise vs escrow is therefore not claimed on this page."));
   (state.listings||[]).forEach((item)=>{
-    const detail=state.listingDetails.get(item.id)||{};
     const line=el("p");
-    line.textContent="#"+item.id+" · "+(detail.funding_mode||"mode ?")+" · "+(detail.settlement_version?"v"+detail.settlement_version:"")+" · "+(item.title||"")+" · "+tokenAmount(item.amount_atomic, item.token||detail.token);
+    const sub=Array.isArray(item.submissions)?item.submissions.length:item.submissions;
+    line.textContent="#"+item.id+" · "+(item.funder||"?")+" · "+(item.title||"")+" · "+tokenAmount(item.amount_atomic, item.token)+" · submissions "+whole(sub);
     list.append(line);
   });
   const tok=state.official&&state.official.official_token;
