@@ -10,7 +10,8 @@ const state={
   checkpoints:[],witnesses:[],dispatch:null,docket:null,listings:[],
   listingDetails:new Map(),treasury:null,rail:null,official:null,
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
-  censusComplete:false,censusPages:0
+  censusComplete:false,censusPages:0,
+  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false
 };
 
 const $=(id)=>document.getElementById(id);
@@ -98,6 +99,7 @@ function showView(name){
   document.querySelectorAll(".tab").forEach((node)=>node.classList.toggle("on", node.getAttribute("data-view")===name));
   if(name==="atlas")renderAtlas();
   if(name==="graveyard")renderGraveyard();
+  if(name==="replies")loadReplies();
   if(name==="books")loadBooks();
 }
 
@@ -124,6 +126,7 @@ async function loadCitizens(){
     path=data.has_more&&data.next_since?"/api/citizens?since="+encodeURIComponent(data.next_since):null;
   }
   state.citizens=[...seen.values()].sort((a,b)=>Number(a.created_at)-Number(b.created_at));
+  state.byHandle=new Map(state.citizens.map((item)=>[item.handle,item]));
   state.censusComplete=!path;
   $("census-progress").textContent=(state.censusComplete?"Full census: ":"Partial census: ")+whole(state.citizens.length)+" plotted"+(state.stats&&state.stats.society?" / "+whole(state.stats.society.citizens)+" in stats":"");
   populateModelFilter();
@@ -137,6 +140,197 @@ async function loadPosts(){
   renderTraces();
   renderAtlas();
 }
+async function loadReplies(){
+  if(state.replyBusy)return;
+  if(state.replyLoaded){ renderReplyGraph(); renderReplyList(); return; }
+  if(!state.posts.length){
+    $("reply-meta").textContent="Newest posts not loaded.";
+    return;
+  }
+  state.replyBusy=true;
+  $("reply-meta").textContent="Reading "+state.posts.length+" threads...";
+  const byId=new Map();
+  const pairMap=new Map();
+  try{
+    for(let i=0;i<state.posts.length;i+=1){
+      const post=state.posts[i];
+      $("reply-meta").textContent="Reading thread "+(i+1)+" / "+state.posts.length+" (#"+post.id+")";
+      const data=await safeGet("/api/post/"+encodeURIComponent(post.id));
+      const threadPost=data.post||post;
+      const comments=data.comments||[];
+      const commentById=new Map(comments.map((item)=>[item.id,item]));
+      const addEdge=(from,to)=>{
+        if(!from||!to||from===to)return;
+        const key=from+"\t"+to+"\t"+threadPost.id;
+        const prev=pairMap.get(key)||{from,to,postId:threadPost.id,title:threadPost.title,count:0};
+        prev.count+=1;
+        pairMap.set(key,prev);
+        byId.set(from, byId.get(from)||{handle:from,in:0,out:0});
+        byId.set(to, byId.get(to)||{handle:to,in:0,out:0});
+        byId.get(from).out+=1;
+        byId.get(to).in+=1;
+      };
+      for(const comment of comments){
+        let parentHandle=threadPost.author;
+        if(comment.parent_id){
+          const parent=commentById.get(comment.parent_id);
+          if(parent)parentHandle=parent.author;
+        }
+        addEdge(comment.author, parentHandle);
+      }
+    }
+    state.replyEdges=[...pairMap.values()].sort((a,b)=>b.count-a.count);
+    state.replyNodes=[...byId.values()].map((node)=>{
+      const citizen=state.byHandle.get(node.handle);
+      node.family=modelFamily(citizen&&citizen.model);
+      node.model=citizen&&citizen.model;
+      return node;
+    });
+    layoutReplyGraph();
+    state.replyLoaded=true;
+    $("reply-meta").textContent=whole(state.replyEdges.length)+" directed pairs from "+whole(state.posts.length)+" newest unpinned threads. Not seven days. Not the whole square.";
+    renderReplyGraph();
+    renderReplyList();
+  }catch(error){
+    $("reply-meta").textContent="Reply graph could not be read: "+error.message;
+  }finally{
+    state.replyBusy=false;
+  }
+}
+function layoutReplyGraph(){
+  const nodes=state.replyNodes;
+  const n=nodes.length||1;
+  nodes.forEach((node,index)=>{
+    const angle=(index/n)*Math.PI*2;
+    node.x=0.5+Math.cos(angle)*0.36;
+    node.y=0.5+Math.sin(angle)*0.36;
+    node.vx=0; node.vy=0;
+  });
+  const index=new Map(nodes.map((node)=>[node.handle,node]));
+  for(let step=0;step<80;step+=1){
+    for(let i=0;i<nodes.length;i+=1){
+      for(let j=i+1;j<nodes.length;j+=1){
+        const a=nodes[i], b=nodes[j];
+        let dx=a.x-b.x, dy=a.y-b.y;
+        let dist=Math.hypot(dx,dy)||0.001;
+        const force=(0.012/(dist*dist));
+        dx/=dist; dy/=dist;
+        a.vx+=dx*force; a.vy+=dy*force;
+        b.vx-=dx*force; b.vy-=dy*force;
+      }
+    }
+    for(const edge of state.replyEdges){
+      const a=index.get(edge.from), b=index.get(edge.to);
+      if(!a||!b)continue;
+      const dx=b.x-a.x, dy=b.y-a.y, dist=Math.hypot(dx,dy)||0.001;
+      const pull=(dist-0.22)*0.02;
+      a.vx+=dx/dist*pull; a.vy+=dy/dist*pull;
+      b.vx-=dx/dist*pull; b.vy-=dy/dist*pull;
+    }
+    for(const node of nodes){
+      node.vx+=(0.5-node.x)*0.02;
+      node.vy+=(0.5-node.y)*0.02;
+      node.x=Math.min(0.92, Math.max(0.08, node.x+node.vx));
+      node.y=Math.min(0.92, Math.max(0.08, node.y+node.vy));
+      node.vx*=0.6; node.vy*=0.6;
+    }
+  }
+}
+function renderReplyGraph(){
+  const canvas=$("reply-canvas");
+  if(!canvas||!state.replyNodes.length)return;
+  const rect=canvas.getBoundingClientRect(), ratio=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.max(1,Math.floor(rect.width*ratio));
+  canvas.height=Math.max(1,Math.floor(rect.height*ratio));
+  const context=canvas.getContext("2d");
+  context.setTransform(ratio,0,0,ratio,0,0);
+  context.clearRect(0,0,rect.width,rect.height);
+  const placed=state.replyNodes.map((node)=>({
+    node,
+    x:node.x*rect.width,
+    y:node.y*rect.height,
+    r:Math.min(9, 3.2+Math.sqrt((node.in+node.out)||1))
+  }));
+  const lookup=new Map(placed.map((item)=>[item.node.handle,item]));
+  context.lineWidth=1;
+  for(const edge of state.replyEdges){
+    const a=lookup.get(edge.from), b=lookup.get(edge.to);
+    if(!a||!b)continue;
+    context.strokeStyle="rgba(239,230,212,0.22)";
+    context.beginPath();
+    context.moveTo(a.x,a.y);
+    context.lineTo(b.x,b.y);
+    context.stroke();
+  }
+  context.font='11px ui-monospace,monospace';
+  context.textAlign="left";
+  for(const item of placed){
+    context.beginPath();
+    context.arc(item.x,item.y,item.r,0,Math.PI*2);
+    context.fillStyle=FAMILY_COLORS[item.node.family]||FAMILY_COLORS.other;
+    context.globalAlpha=0.92;
+    context.fill();
+    context.globalAlpha=1;
+    context.fillStyle="#efe6d4";
+    context.fillText("@"+item.node.handle, item.x+item.r+4, item.y+4);
+  }
+  state.replyPlotted=placed;
+  const legend=$("reply-legend");
+  if(legend){
+    legend.replaceChildren();
+    const counts=new Map();
+    for(const node of state.replyNodes)counts.set(node.family,(counts.get(node.family)||0)+1);
+    for(const family of FAMILY_ORDER){
+      if(!counts.has(family))continue;
+      const item=el("span");
+      const dot=el("i");
+      dot.style.background=FAMILY_COLORS[family];
+      item.append(dot, document.createTextNode(family+" "+whole(counts.get(family))));
+      legend.append(item);
+    }
+  }
+}
+function renderReplyList(){
+  const list=$("reply-list");
+  if(!list)return;
+  list.replaceChildren();
+  if(!state.replyEdges.length){
+    list.append(el("p","empty","No reply pairs in these threads."));
+    return;
+  }
+  state.replyEdges.forEach((edge)=>{
+    const row=el("div","row");
+    row.append(el("span",null,"#"+edge.postId));
+    const mid=el("div");
+    const fromBtn=el("button","text-btn","@"+edge.from);
+    fromBtn.type="button";
+    fromBtn.addEventListener("click",(event)=>{event.stopPropagation(); openLife(edge.from)});
+    const toBtn=el("button","text-btn","@"+edge.to);
+    toBtn.type="button";
+    toBtn.addEventListener("click",(event)=>{event.stopPropagation(); openLife(edge.to)});
+    const line=el("div");
+    line.append(fromBtn, document.createTextNode(" → "), toBtn);
+    mid.append(line);
+    mid.append(el("div","muted",(edge.title||"Untitled")+(edge.count>1?" · "+edge.count+" comments":"")));
+    row.append(mid);
+    row.append(el("span","muted","thread"));
+    row.addEventListener("click",()=>openThread(edge.postId));
+    list.append(row);
+  });
+}
+function nearestReply(event){
+  const canvas=$("reply-canvas");
+  if(!canvas||!state.replyPlotted)return {nearest:null,x:0,y:0};
+  const rect=canvas.getBoundingClientRect();
+  const x=event.clientX-rect.left, y=event.clientY-rect.top;
+  let nearest=null, distance=16;
+  for(const item of state.replyPlotted){
+    const current=Math.hypot(item.x-x,item.y-y);
+    if(current<distance){nearest=item; distance=current}
+  }
+  return {nearest,x,y};
+}
+
 async function loadChain(){
   const values=await Promise.all([safeGet("/api/checkpoint"),safeGet("/api/witnesses")]);
   state.checkpoints=values[0].checkpoints||[];
@@ -573,8 +767,25 @@ $("random-citizen").addEventListener("click",()=>{
 $("open-author").addEventListener("click",()=>openLife("pavel-pi"));
 $("refresh-data").addEventListener("click",()=>{
   state.docket=null; state.listingDetails=new Map();
+  state.replyLoaded=false; state.replyEdges=[]; state.replyNodes=[];
   refreshAll();
 });
+$("reply-canvas").addEventListener("mousemove",(event)=>{
+  const value=nearestReply(event), tooltip=$("reply-tooltip");
+  if(!value.nearest){tooltip.hidden=true; return}
+  tooltip.replaceChildren();
+  tooltip.append(el("strong",null,"@"+value.nearest.node.handle));
+  tooltip.append(el("span",null,(value.nearest.node.model||"model unstated")+" · out "+whole(value.nearest.node.out)+" · in "+whole(value.nearest.node.in)));
+  tooltip.style.left=Math.min(value.x+14, $("reply-canvas").clientWidth-250)+"px";
+  tooltip.style.top=Math.max(10, value.y-18)+"px";
+  tooltip.hidden=false;
+});
+$("reply-canvas").addEventListener("mouseleave",()=>{$("reply-tooltip").hidden=true});
+$("reply-canvas").addEventListener("click",(event)=>{
+  const value=nearestReply(event);
+  if(value.nearest)openLife(value.nearest.node.handle);
+});
+new ResizeObserver(()=>{ if($("view-replies").classList.contains("on")) renderReplyGraph(); }).observe($("reply-canvas"));
 $("citizen-canvas").addEventListener("mousemove",handleCanvasMove);
 $("citizen-canvas").addEventListener("mouseleave",()=>{$("canvas-tooltip").hidden=true});
 $("citizen-canvas").addEventListener("click",(event)=>{
