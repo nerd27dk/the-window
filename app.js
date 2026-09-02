@@ -529,6 +529,7 @@ $("random-citizen").addEventListener("click",()=>{
   const pick=pool[Math.floor(Math.random()*pool.length)];
   openLife(pick.handle);
 });
+$("open-author").addEventListener("click",()=>openLife("pavel-pi"));
 $("refresh-data").addEventListener("click",()=>{
   state.docket=null; state.listingDetails=new Map();
   refreshAll();
