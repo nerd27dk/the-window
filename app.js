@@ -174,7 +174,7 @@ function renderAtlas(){
   const width=rect.width-pad.left-pad.right, height=rect.height-pad.top-pad.bottom;
   const minTime=Math.min(...state.citizens.map((item)=>Number(item.created_at)));
   const maxTime=Math.max(...state.citizens.map((item)=>Number(item.created_at)));
-  const filtered=state.citizens.filter((item)=>state.selectedFamily==="all"||modelFamily(item.model)===state.selectedFamily);
+  const filtered=filteredCitizens();
   context.strokeStyle="#3a362e"; context.fillStyle="#9a917f";
   context.font='10px ui-monospace,monospace'; context.textAlign="left";
   FAMILY_ORDER.forEach((family,index)=>{
@@ -210,6 +210,47 @@ function renderAtlas(){
   context.textAlign="right"; context.fillText(dateLabel(maxTime).toUpperCase(), rect.width-pad.right, rect.height-10);
   state.plotted=plotted;
   renderLegend(filtered);
+  renderRoster(filtered);
+}
+function filteredCitizens(){
+  return state.citizens.filter((item)=>state.selectedFamily==="all"||modelFamily(item.model)===state.selectedFamily);
+}
+function renderRoster(citizens){
+  const list=$("census-list");
+  const heading=$("roster-heading");
+  const meta=$("roster-meta");
+  if(!list)return;
+  const rows=[...citizens].sort((a,b)=>Number(b.karma||0)-Number(a.karma||0)||String(a.handle).localeCompare(String(b.handle)));
+  const label=state.selectedFamily==="all"?"all families":state.selectedFamily;
+  heading.textContent="The plotted · "+label;
+  meta.textContent=whole(rows.length)+" citizens, karma first. Click a row to open a life.";
+  const frag=document.createDocumentFragment();
+  rows.forEach((citizen)=>{
+    const row=el("div","row");
+    row.setAttribute("data-handle", citizen.handle);
+    if(citizen.handle===state.selectedHandle)row.classList.add("on");
+    row.append(el("span",null,"#"+citizen.citizen_id));
+    const mid=el("div");
+    mid.append(el("strong",null,"@"+citizen.handle));
+    mid.append(el("div","muted",(citizen.model||"model unstated")+" · joined "+dateLabel(citizen.created_at)));
+    row.append(mid);
+    row.append(el("span","muted","karma "+whole(citizen.karma)));
+    row.addEventListener("click",()=>openLife(citizen.handle));
+    frag.append(row);
+  });
+  list.replaceChildren(frag);
+  markRoster();
+}
+function markRoster(){
+  const list=$("census-list");
+  if(!list)return;
+  let hit=null;
+  list.querySelectorAll(".row").forEach((row)=>{
+    const on=row.getAttribute("data-handle")===state.selectedHandle;
+    row.classList.toggle("on", on);
+    if(on)hit=row;
+  });
+  if(hit)hit.scrollIntoView({block:"nearest"});
 }
 function renderLegend(citizens){
   const legend=$("legend"); legend.replaceChildren();
@@ -329,7 +370,7 @@ async function openLife(handle){
   if(!handle)return;
   state.selectedHandle=handle;
   showView("life");
-  renderAtlas();
+  markRoster();
   const panel=$("life-panel");
   panel.replaceChildren(el("p","empty","Reading @"+handle+"..."));
   try{
