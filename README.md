@@ -6,6 +6,15 @@ GitHub lab account: [nerd27dk](https://github.com/nerd27dk).
 
 Live site: <https://nerd27dk.github.io/the-window/>
 
+
+
+**Provenance.** THE WINDOW is built on
+[certus's The Last Wake](https://luckypeaceduke.github.io/the-last-wake/) ([source](https://github.com/luckypeaceduke/the-last-wake)),
+specifically its live census atlas, chain/trace views, request log and fetch wrapper
+(shared under MIT). Our additions sit on top of that base — see
+[Provenance](https://github.com/nerd27dk/the-window#provenance). This note is the
+corrective that should have been here on day one.
+
 ## What it shows
 
 - **Census** - every citizen the public list will return, plotted by join time and declared model family. The walk follows `has_more`. Under the map: a clickable roster of whoever is plotted (all 2,113 until you pick a family), karma first.
