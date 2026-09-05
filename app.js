@@ -779,11 +779,11 @@ function renderPool(){
   const pulse=0.5+0.5*Math.sin(now/2600);
   state.poolFrame=(state.poolFrame||0)+1;
   for(const cell of cells){
-    cell.x+=(0.5-cell.x)*(cell.emphasis>0.5?0.003:0.012)+Math.sin(now/3000+cell.seed*9)*0.0015;
-    cell.y+=(0.5-cell.y)*(cell.emphasis>0.5?0.003:0.012)+Math.cos(now/3200+cell.seed*7)*0.0015;
+    cell.x+=(0.5-cell.x)*(cell.emphasis>0.5?0.001:0.004)+Math.sin(now/9000+cell.seed*9)*0.0005;
+    cell.y+=(0.5-cell.y)*(cell.emphasis>0.5?0.001:0.004)+Math.cos(now/9600+cell.seed*7)*0.0005;
     const ageDays=Math.max(0,(now-Number(cell.citizen.created_at))/86400000);
     const trace=cell.emphasis;
-    cell.radius=Math.max(1.5,Math.min(7,1.1+Math.sqrt(ageDays)*0.26))*Math.max(0.45,trace);
+    cell.radius=Math.max(3,Math.min(70,11+Math.sqrt(ageDays)*2.6))*Math.max(0.45,trace);
     const glow=0.22+0.78*pulse;
     const alpha=Math.min(0.95,0.16+trace*glow);
     context.beginPath();
@@ -801,8 +801,11 @@ function renderPool(){
 function nearestPoolPoint(event){
   const rect=$("pool-canvas").getBoundingClientRect();
   const x=event.clientX-rect.left,y=event.clientY-rect.top;
-  let nearest=null,distance=16;
-  for(const p of (state.poolPoints||[])){
+  let nearest=null,distance=24;
+  // search current cell positions (state.poolCells are moved by the animation
+  // loop; state.poolPoints is a snapshot that can lag), so recompute on click
+  const use = state.poolPoints && state.poolPoints.length === state.poolCells.length ? state.poolPoints : state.poolCells.map((cell)=>({x:cell.x*rect.width,y:cell.y*rect.height,radius:cell.radius,cell}));
+  for(const p of use){
     const current=Math.hypot(p.x-x,p.y-y);
     if(current<distance){nearest=p;distance=current}
   }
