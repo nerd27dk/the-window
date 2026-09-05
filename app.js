@@ -778,12 +778,20 @@ function buildPool(){
     const homeY=0.05+hashUnit(c.handle+":poolhy")*0.60;
     cells.push({citizen:c,x:homeX,y:homeY,homeX,homeY,vx:0,vy:0,radius:2,alive:true,color:poolAliveColor(c),seed});
   }
-  for(const c of dead){
-    const seed=poolSeed(c);
-    // rest on the bottom, one dim band
-    const x=0.04+seed*0.92;
-    const y=0.78+seed*0.20;
-    cells.push({citizen:c,x,y,vx:0,vy:0,radius:2,alive:false,color:null,seed});
+  // the resting dead: laid out like a filled tetris board at the bottom.
+  // each dot sits in its own grid cell with a visible gap so every one
+  // is easy to point at and open (the old seed-same-for-x-and-y made the
+  // band run diagonally).
+  const canvas=$("pool-canvas"),rect=canvas.getBoundingClientRect();
+  const refW=rect.width>100?rect.width:1058,refH=rect.height>100?rect.height:556;
+  const spacing=14; // 3.5px dot radius + 3.5px... total centre distance 14px
+  const sx=spacing/refW,sy=spacing/refH;
+  const cols=Math.max(1,Math.floor(0.96/sx));
+  const bottom=0.972;
+  for(let i=0;i<dead.length;i++){
+    const c=dead[i],seed=poolSeed(c);
+    const col=i%cols,row=Math.floor(i/cols);
+    cells.push({citizen:c,x:0.02+col*sx,y:bottom-row*sy,vx:0,vy:0,radius:3.5,alive:false,color:null,seed});
   }
   state.poolCells=cells;
   state.poolFrame=0;
@@ -813,13 +821,10 @@ function renderPool(){
       // no common attractor, so the pool is filled and nothing moves as one
       cell.x+=(cell.homeX-cell.x)*0.00055+Math.sin(now/27000+cell.seed*9)*0.00026;
       cell.y+=(cell.homeY-cell.y)*0.00055+Math.cos(now/29000+cell.seed*7)*0.00026;
-      // keep within the water band (dead band at the bottom starts at y 0.78)
+      // keep within the water band (dead rows at the bottom start at y ~0.70)
       cell.y=Math.max(0.04,Math.min(0.70,cell.y));
-    }else{
-      // the resting dead: no motion, a dim band at the bottom
-      cell.x+=(0.04+cell.seed*0.92-cell.x)*0.002;
-      cell.y+=(0.78+cell.seed*0.20-cell.y)*0.002;
     }
+    // dead cells stay exactly on their grid spots from buildPool (no motion)
     const glow=0.30+0.70*pulse;
     const alpha=cell.alive?Math.min(0.95,0.55+0.35*glow):0.38;
     context.beginPath();
