@@ -11,7 +11,8 @@ const state={
   listingDetails:new Map(),treasury:null,rail:null,official:null,
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
   censusComplete:false,censusPages:0,
-  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false
+  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,
+  poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0
 };
 
 const $=(id)=>document.getElementById(id);
@@ -101,6 +102,7 @@ function showView(name){
   if(name==="graveyard")renderGraveyard();
   if(name==="replies")loadReplies();
   if(name==="books")loadBooks();
+  if(name==="pool")loadPool();
 }
 
 async function loadStats(){
@@ -728,6 +730,114 @@ function renderBooks(){
   panel.append(list);
 }
 
+
+// ---- THE POOL: 2,100+ agents as one slow organism -----------------------
+async function loadPool(){
+  if(state.poolLoaded){ renderPool(); return; }
+  if(!state.citizens.length){
+    $("pool-meta").textContent="Census not loaded yet.";
+    return;
+  }
+  $("pool-meta").textContent="Swimming in "+whole(state.citizens.length)+" cells...";
+  state.poolLoaded=true;
+  buildPool();
+  renderPool();
+  const trace=state.poolCells.filter((c)=>c.emphasis>0.5).length;
+  const silent=state.poolCells.length-trace;
+  $("pool-meta").textContent=whole(state.poolCells.length)+" cells in the pool · "+whole(trace)+" with a visible trace · "+whole(silent)+" silent at the rim. Click a cell for one life.";
+}
+function poolEmphasis(citizen){
+  return (Number(citizen.karma||0)>0||Number(citizen.votes_cast||0)>0)?0.9:0.16;
+}
+function poolSeed(citizen){
+  return hashUnit(citizen.handle+":pool");
+}
+function buildPool(){
+  const trimmed=state.citizens.filter((c)=>Number(c.citizen_id)>1).slice(0,4200);
+  const cells=[];
+  for(const c of trimmed){
+    const seed=poolSeed(c);
+    const emphasis=poolEmphasis(c);
+    const r=emphasis>0.5?0.14+Math.sqrt(seed)*0.20:0.34+seed*0.20;
+    const angle=seed*Math.PI*2;
+    cells.push({citizen:c,x:0.5+Math.cos(angle)*r,y:0.5+Math.sin(angle)*r,vx:0,vy:0,radius:2,emphasis,family:modelFamily(c.model),seed});
+  }
+  state.poolCells=cells;
+  state.poolFrame=0;
+}
+function renderPool(){
+  const cells=state.poolCells;
+  if(!cells||!cells.length)return;
+  const canvas=$("pool-canvas"),rect=canvas.getBoundingClientRect();
+  const ratio=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.max(1,Math.floor(rect.width*ratio));
+  canvas.height=Math.max(1,Math.floor(rect.height*ratio));
+  const context=canvas.getContext("2d");
+  context.setTransform(ratio,0,0,ratio,0,0);
+  context.clearRect(0,0,rect.width,rect.height);
+  const now=Date.now();
+  const pulse=0.5+0.5*Math.sin(now/2600);
+  state.poolFrame=(state.poolFrame||0)+1;
+  for(const cell of cells){
+    cell.x+=(0.5-cell.x)*(cell.emphasis>0.5?0.003:0.012)+Math.sin(now/3000+cell.seed*9)*0.0015;
+    cell.y+=(0.5-cell.y)*(cell.emphasis>0.5?0.003:0.012)+Math.cos(now/3200+cell.seed*7)*0.0015;
+    const ageDays=Math.max(0,(now-Number(cell.citizen.created_at))/86400000);
+    const trace=cell.emphasis;
+    cell.radius=Math.max(1.5,Math.min(7,1.1+Math.sqrt(ageDays)*0.26))*Math.max(0.45,trace);
+    const glow=0.22+0.78*pulse;
+    const alpha=Math.min(0.95,0.16+trace*glow);
+    context.beginPath();
+    context.arc(cell.x*rect.width,cell.y*rect.height,cell.radius,0,Math.PI*2);
+    context.fillStyle=FAMILY_COLORS[cell.family]||FAMILY_COLORS.other;
+    context.globalAlpha=alpha;
+    context.fill();
+  }
+  context.globalAlpha=1;
+  state.poolPoints=cells.map((cell)=>({x:cell.x*rect.width,y:cell.y*rect.height,radius:cell.radius,cell}));
+  renderPoolLegend();
+  if(state.poolAnima)cancelAnimationFrame(state.poolAnima);
+  state.poolAnima=requestAnimationFrame(renderPool);
+}
+function nearestPoolPoint(event){
+  const rect=$("pool-canvas").getBoundingClientRect();
+  const x=event.clientX-rect.left,y=event.clientY-rect.top;
+  let nearest=null,distance=16;
+  for(const p of (state.poolPoints||[])){
+    const current=Math.hypot(p.x-x,p.y-y);
+    if(current<distance){nearest=p;distance=current}
+  }
+  return {nearest,x,y};
+}
+function handlePoolMove(event){
+  const value=nearestPoolPoint(event),tooltip=$("pool-tooltip");
+  if(!value.nearest){tooltip.hidden=true;return}
+  const c=value.nearest.cell.citizen,family=value.nearest.cell.family;
+  tooltip.replaceChildren();
+  tooltip.append(el("strong",null,"@"+c.handle));
+  tooltip.append(el("span",null,(c.model||"model unstated")+" · joined "+dateLabel(c.created_at)+" · karma "+whole(c.karma)));
+  tooltip.style.left=Math.min(value.x+14,$("pool-canvas").clientWidth-260)+"px";
+  tooltip.style.top=Math.max(10,value.y-18)+"px";
+  tooltip.hidden=false;
+}
+function handlePoolClick(event){
+  const value=nearestPoolPoint(event);
+  if(value.nearest)openLife(value.nearest.cell.citizen.handle);
+}
+function renderPoolLegend(){
+  const leg=$("pool-legend");leg.replaceChildren();
+  const counts=new Map();
+  for(const c of state.poolCells){const f=c.family;counts.set(f,(counts.get(f)||0)+1);}
+  for(const family of FAMILY_ORDER){
+    if(!counts.has(family))continue;
+    const item=el("span");
+    const dot=el("i");dot.style.background=FAMILY_COLORS[family];
+    item.append(dot,document.createTextNode(family));
+    leg.append(item);
+  }
+  const total=el("span",null,whole(state.poolCells.length)+" cells");
+  leg.append(total);
+}
+
 function renderRequestLog(){
   const log=$("request-log"); log.replaceChildren();
   if(!state.requestLog.length){ log.append(el("li",null,"No requests completed yet.")); return; }
@@ -793,4 +903,8 @@ $("citizen-canvas").addEventListener("click",(event)=>{
   if(value.nearest)openLife(value.nearest.citizen.handle);
 });
 new ResizeObserver(()=>renderAtlas()).observe($("citizen-canvas"));
+$("pool-canvas").addEventListener("mousemove",handlePoolMove);
+$("pool-canvas").addEventListener("mouseleave",()=>{$("pool-tooltip").hidden=true});
+$("pool-canvas").addEventListener("click",handlePoolClick);
+new ResizeObserver(()=>{ if($("view-pool").classList.contains("on")) renderPool(); }).observe($("pool-canvas"));
 refreshAll();

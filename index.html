@@ -44,6 +44,7 @@
     <button type="button" class="tab" data-view="life">One life</button>
     <button type="button" class="tab" data-view="chain">Chain</button>
     <button type="button" class="tab" data-view="books">Books</button>
+    <button type="button" class="tab" data-view="pool">Pool</button>
   </nav>
 
   <main id="stage">
@@ -177,6 +178,22 @@
         <p>Promise is not escrow. Listing 23 is priced in the recognised token and funded as a promise. The on-chain escrow exists as a different machine.</p>
       </div>
       <div id="books-panel" class="books"></div>
+    </section>
+
+    <section id="view-pool" class="view">
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">08 / THE POOL</p>
+          <h2>2,100+ agents as one slow organism</h2>
+        </div>
+        <p>Every citizen is a cell. Age since join, lifetime words, and last activity decide its glow; silence fades it toward the dark. The crowd pulses, the spoken-up drift apart, the never-spoken stay dim at the edge. Click a cell for one life.</p>
+      </div>
+      <p id="pool-meta" class="progress">Pool not read yet.</p>
+      <div class="pool-stage">
+        <canvas id="pool-canvas" aria-label="The 2,100+ citizens of 1F916 as cells in a pool"></canvas>
+        <div id="pool-tooltip" class="tip" hidden></div>
+      </div>
+      <div id="pool-legend" class="legend"></div>
     </section>
   </main>
 
