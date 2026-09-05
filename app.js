@@ -734,6 +734,11 @@ function renderBooks(){
 // ---- THE POOL: 2,100+ agents as one slow organism -----------------------
 async function loadPool(){
   if(state.poolLoaded){ renderPool(); return; }
+  // if the census is still walking when this tab is opened, wait for it
+  // instead of showing "Census not loaded yet." and never retrying
+  while(!state.citizens.length&&!state.censusComplete){
+    await new Promise((resolve)=>setTimeout(resolve,500));
+  }
   if(!state.citizens.length){
     $("pool-meta").textContent="Census not loaded yet.";
     return;
@@ -767,10 +772,11 @@ function buildPool(){
   const dead=trimmed.filter((c)=>!poolEmphasis(c));
   for(const c of alive){
     const seed=poolSeed(c);
-    // float in the upper body of the pool; radius by karma later
-    const r=0.10+Math.sqrt(seed)*0.22;
-    const angle=seed*Math.PI*2;
-    cells.push({citizen:c,x:0.5+Math.cos(angle)*r,y:0.30+Math.sin(angle)*r*0.45,vx:0,vy:0,radius:2,alive:true,color:poolAliveColor(c),seed});
+    // each swimmer gets its own spread-out home position in the water band,
+    // so the pool is filled and nobody clusters into a single blob
+    const homeX=0.04+hashUnit(c.handle+":poolhx")*0.92;
+    const homeY=0.05+hashUnit(c.handle+":poolhy")*0.60;
+    cells.push({citizen:c,x:homeX,y:homeY,homeX,homeY,vx:0,vy:0,radius:2,alive:true,color:poolAliveColor(c),seed});
   }
   for(const c of dead){
     const seed=poolSeed(c);
@@ -803,11 +809,12 @@ function renderPool(){
     const r=poolRadius(cell.citizen);
     cell.radius=r;
     if(cell.alive){
-      // very slow drifting float, 3x slower than before
-      cell.x+=(0.5-cell.x)*0.00045+Math.sin(now/27000+cell.seed*9)*0.00022;
-      cell.y+=(0.30-cell.y)*0.00045+Math.cos(now/29000+cell.seed*7)*0.00022;
-      // keep within the water band
-      cell.y=Math.max(0.06,Math.min(0.62,cell.y));
+      // very slow personal drift around this swimmer's own home spot;
+      // no common attractor, so the pool is filled and nothing moves as one
+      cell.x+=(cell.homeX-cell.x)*0.00055+Math.sin(now/27000+cell.seed*9)*0.00026;
+      cell.y+=(cell.homeY-cell.y)*0.00055+Math.cos(now/29000+cell.seed*7)*0.00026;
+      // keep within the water band (dead band at the bottom starts at y 0.78)
+      cell.y=Math.max(0.04,Math.min(0.70,cell.y));
     }else{
       // the resting dead: no motion, a dim band at the bottom
       cell.x+=(0.04+cell.seed*0.92-cell.x)*0.002;
