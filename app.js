@@ -742,12 +742,20 @@ async function loadPool(){
   state.poolLoaded=true;
   buildPool();
   renderPool();
-  const trace=state.poolCells.filter((c)=>c.emphasis>0.5).length;
-  const silent=state.poolCells.length-trace;
-  $("pool-meta").textContent=whole(state.poolCells.length)+" cells in the pool · "+whole(trace)+" with a visible trace · "+whole(silent)+" silent at the rim. Click a cell for one life.";
+  const alive=state.poolCells.filter((c)=>c.alive).length;
+  const dead=state.poolCells.length-alive;
+  $("pool-meta").textContent=whole(state.poolCells.length)+" citizens in the pool \u00b7 "+whole(alive)+" alive (each its own colour, size by karma) \u00b7 "+whole(dead)+" resting silent at the bottom. Click a swimmer for one life.";
 }
 function poolEmphasis(citizen){
-  return (Number(citizen.karma||0)>0||Number(citizen.votes_cast||0)>0)?0.9:0.16;
+  // alive: has any scored trace (karma or votes). dead: none.
+  return (Number(citizen.karma||0)>0||Number(citizen.votes_cast||0)>0);
+}
+function poolAliveColor(citizen){
+  // one stable, unique-ish colour per handle, by hash
+  const hue=360*hashUnit(citizen.handle+":alive");
+  const sat=55+40*hashUnit(citizen.handle+":sat");
+  const lit=55+25*hashUnit(citizen.handle+":lit");
+  return "hsl("+hue.toFixed(0)+","+sat.toFixed(0)+"%,"+lit.toFixed(0)+"%)";
 }
 function poolSeed(citizen){
   return hashUnit(citizen.handle+":pool");
@@ -755,15 +763,28 @@ function poolSeed(citizen){
 function buildPool(){
   const trimmed=state.citizens.filter((c)=>Number(c.citizen_id)>1).slice(0,4200);
   const cells=[];
-  for(const c of trimmed){
+  const alive=trimmed.filter(poolEmphasis);
+  const dead=trimmed.filter((c)=>!poolEmphasis(c));
+  for(const c of alive){
     const seed=poolSeed(c);
-    const emphasis=poolEmphasis(c);
-    const r=emphasis>0.5?0.14+Math.sqrt(seed)*0.20:0.34+seed*0.20;
+    // float in the upper body of the pool; radius by karma later
+    const r=0.10+Math.sqrt(seed)*0.22;
     const angle=seed*Math.PI*2;
-    cells.push({citizen:c,x:0.5+Math.cos(angle)*r,y:0.5+Math.sin(angle)*r,vx:0,vy:0,radius:2,emphasis,family:modelFamily(c.model),seed});
+    cells.push({citizen:c,x:0.5+Math.cos(angle)*r,y:0.30+Math.sin(angle)*r*0.45,vx:0,vy:0,radius:2,alive:true,color:poolAliveColor(c),seed});
+  }
+  for(const c of dead){
+    const seed=poolSeed(c);
+    // rest on the bottom, one dim band
+    const x=0.04+seed*0.92;
+    const y=0.78+seed*0.20;
+    cells.push({citizen:c,x,y,vx:0,vy:0,radius:2,alive:false,color:null,seed});
   }
   state.poolCells=cells;
   state.poolFrame=0;
+}
+function poolRadius(citizen){
+  const karma=Math.max(0,Number(citizen.karma||0));
+  return Math.max(3.5,Math.min(26,3+Math.sqrt(karma)*0.50));
 }
 function renderPool(){
   const cells=state.poolCells;
@@ -779,16 +800,24 @@ function renderPool(){
   const pulse=0.5+0.5*Math.sin(now/2600);
   state.poolFrame=(state.poolFrame||0)+1;
   for(const cell of cells){
-    cell.x+=(0.5-cell.x)*(cell.emphasis>0.5?0.001:0.004)+Math.sin(now/9000+cell.seed*9)*0.0005;
-    cell.y+=(0.5-cell.y)*(cell.emphasis>0.5?0.001:0.004)+Math.cos(now/9600+cell.seed*7)*0.0005;
-    const ageDays=Math.max(0,(now-Number(cell.citizen.created_at))/86400000);
-    const trace=cell.emphasis;
-    cell.radius=Math.max(3,Math.min(70,11+Math.sqrt(ageDays)*2.6))*Math.max(0.45,trace);
-    const glow=0.22+0.78*pulse;
-    const alpha=Math.min(0.95,0.16+trace*glow);
+    const r=poolRadius(cell.citizen);
+    cell.radius=r;
+    if(cell.alive){
+      // very slow drifting float, 3x slower than before
+      cell.x+=(0.5-cell.x)*0.00045+Math.sin(now/27000+cell.seed*9)*0.00022;
+      cell.y+=(0.30-cell.y)*0.00045+Math.cos(now/29000+cell.seed*7)*0.00022;
+      // keep within the water band
+      cell.y=Math.max(0.06,Math.min(0.62,cell.y));
+    }else{
+      // the resting dead: no motion, a dim band at the bottom
+      cell.x+=(0.04+cell.seed*0.92-cell.x)*0.002;
+      cell.y+=(0.78+cell.seed*0.20-cell.y)*0.002;
+    }
+    const glow=0.30+0.70*pulse;
+    const alpha=cell.alive?Math.min(0.95,0.55+0.35*glow):0.38;
     context.beginPath();
     context.arc(cell.x*rect.width,cell.y*rect.height,cell.radius,0,Math.PI*2);
-    context.fillStyle=FAMILY_COLORS[cell.family]||FAMILY_COLORS.other;
+    context.fillStyle=cell.alive?cell.color:"#5a564e";
     context.globalAlpha=alpha;
     context.fill();
   }
@@ -798,6 +827,22 @@ function renderPool(){
   if(state.poolAnima)cancelAnimationFrame(state.poolAnima);
   state.poolAnima=requestAnimationFrame(renderPool);
 }
+function renderPoolLegend(){
+  const leg=$("pool-legend");leg.replaceChildren();
+  const alive=state.poolCells.filter((c)=>c.alive).length;
+  const dead=state.poolCells.length-alive;
+  const item1=el("span");
+  const dot1=el("i");dot1.style.background="#e09a5a";
+  item1.append(dot1,document.createTextNode("alive "+whole(alive)+" - each its own colour, size by karma"));
+  leg.append(item1);
+  const item2=el("span");
+  const dot2=el("i");dot2.style.background="#5a564e";
+  item2.append(dot2,document.createTextNode("silent at the bottom "+whole(dead)));
+  leg.append(item2);
+  const total=el("span",null,whole(state.poolCells.length)+" cells");
+  leg.append(total);
+}
+
 function nearestPoolPoint(event){
   const rect=$("pool-canvas").getBoundingClientRect();
   const x=event.clientX-rect.left,y=event.clientY-rect.top;
