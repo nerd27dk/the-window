@@ -11,7 +11,7 @@ const state={
   listingDetails:new Map(),treasury:null,rail:null,official:null,
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
   censusComplete:false,censusPages:0,censusPromise:null,censusError:null,
-  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,
+  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,replyHover:null,
   poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0,
   threadRequest:0,lifeRequest:0
 };
@@ -319,7 +319,6 @@ async function loadReplies(){
       node.model=citizen&&citizen.model;
       return node;
     });
-    layoutReplyGraph();
     state.replyLoaded=true;
     $("reply-meta").textContent=whole(state.replyEdges.length)+" directed pairs from "+whole(state.posts.length)+" newest unpinned threads. Not seven days. Not the whole square.";
     renderReplyGraph();
@@ -330,84 +329,103 @@ async function loadReplies(){
     state.replyBusy=false;
   }
 }
-function layoutReplyGraph(){
-  const nodes=state.replyNodes;
-  const n=nodes.length||1;
-  nodes.forEach((node,index)=>{
-    const angle=(index/n)*Math.PI*2;
-    node.x=0.5+Math.cos(angle)*0.36;
-    node.y=0.5+Math.sin(angle)*0.36;
-    node.vx=0; node.vy=0;
-  });
-  const index=new Map(nodes.map((node)=>[node.handle,node]));
-  for(let step=0;step<80;step+=1){
-    for(let i=0;i<nodes.length;i+=1){
-      for(let j=i+1;j<nodes.length;j+=1){
-        const a=nodes[i], b=nodes[j];
-        let dx=a.x-b.x, dy=a.y-b.y;
-        let dist=Math.hypot(dx,dy)||0.001;
-        const force=(0.012/(dist*dist));
-        dx/=dist; dy/=dist;
-        a.vx+=dx*force; a.vy+=dy*force;
-        b.vx-=dx*force; b.vy-=dy*force;
-      }
-    }
-    for(const edge of state.replyEdges){
-      const a=index.get(edge.from), b=index.get(edge.to);
-      if(!a||!b)continue;
-      const dx=b.x-a.x, dy=b.y-a.y, dist=Math.hypot(dx,dy)||0.001;
-      const pull=(dist-0.22)*0.02;
-      a.vx+=dx/dist*pull; a.vy+=dy/dist*pull;
-      b.vx-=dx/dist*pull; b.vy-=dy/dist*pull;
-    }
-    for(const node of nodes){
-      node.vx+=(0.5-node.x)*0.02;
-      node.vy+=(0.5-node.y)*0.02;
-      node.x=Math.min(0.92, Math.max(0.08, node.x+node.vx));
-      node.y=Math.min(0.92, Math.max(0.08, node.y+node.vy));
-      node.vx*=0.6; node.vy*=0.6;
-    }
+function aggregateReplyRelationships(){
+  const relationships=new Map();
+  for(const edge of state.replyEdges){
+    const key=edge.from+"\t"+edge.to;
+    let item=relationships.get(key);
+    if(!item){item={from:edge.from,to:edge.to,comments:0,threads:new Set()};relationships.set(key,item)}
+    item.comments+=Number(edge.count||0);
+    item.threads.add(String(edge.postId));
   }
+  return [...relationships.values()].map((item)=>({
+    from:item.from,to:item.to,comments:item.comments,threads:item.threads.size
+  }));
 }
 function renderReplyGraph(){
   const canvas=$("reply-canvas");
-  if(!canvas||!state.replyNodes.length)return;
-  const rect=canvas.getBoundingClientRect(), ratio=Math.min(window.devicePixelRatio||1,2);
+  if(!canvas)return;
+  const rect=canvas.getBoundingClientRect();
+  if(!state.replyNodes.length||rect.width<1||rect.height<1){state.replyPlotted=[];return}
+  const ratio=Math.min(window.devicePixelRatio||1,2);
   canvas.width=Math.max(1,Math.floor(rect.width*ratio));
   canvas.height=Math.max(1,Math.floor(rect.height*ratio));
   const context=canvas.getContext("2d");
   context.setTransform(ratio,0,0,ratio,0,0);
   context.clearRect(0,0,rect.width,rect.height);
-  const placed=state.replyNodes.map((node)=>({
-    node,
-    x:node.x*rect.width,
-    y:node.y*rect.height,
-    r:Math.min(9, 3.2+Math.sqrt((node.in+node.out)||1))
-  }));
+  const style=getComputedStyle(canvas);
+  const paper=style.getPropertyValue("--paper").trim()||"#1c1a16";
+  const line=style.getPropertyValue("--line").trim()||"#3a362e";
+  const centerX=rect.width/2, centerY=rect.height/2;
+  const radiusX=Math.max(18,rect.width/2-42), radiusY=Math.max(18,rect.height/2-42);
+  const familyIndex=(family)=>{const index=FAMILY_ORDER.indexOf(family);return index<0?FAMILY_ORDER.length:index};
+  const ordered=[...state.replyNodes].sort((a,b)=>familyIndex(a.family)-familyIndex(b.family)||a.handle.localeCompare(b.handle));
+  const placed=ordered.map((node,index)=>{
+    const angle=-Math.PI/2+(index/ordered.length)*Math.PI*2;
+    const x=centerX+Math.cos(angle)*radiusX;
+    const y=centerY+Math.sin(angle)*radiusY;
+    const r=Math.min(8,3.2+Math.sqrt((node.in+node.out)||1)*0.55);
+    return {node,x,y,r,hitRadius:Math.max(13,r+5)};
+  });
   const lookup=new Map(placed.map((item)=>[item.node.handle,item]));
-  context.lineWidth=1;
-  for(const edge of state.replyEdges){
+  const hovered=state.replyHover;
+  const relationships=aggregateReplyRelationships();
+
+  context.beginPath();
+  context.ellipse(centerX,centerY,radiusX,radiusY,0,0,Math.PI*2);
+  context.strokeStyle=line; context.lineWidth=1; context.globalAlpha=0.7; context.stroke();
+  for(const edge of relationships){
     const a=lookup.get(edge.from), b=lookup.get(edge.to);
     if(!a||!b)continue;
-    context.strokeStyle="rgba(239,230,212,0.22)";
-    context.beginPath();
-    context.moveTo(a.x,a.y);
-    context.lineTo(b.x,b.y);
-    context.stroke();
+    const dx=b.x-a.x, dy=b.y-a.y, distance=Math.hypot(dx,dy)||1;
+    const direction=edge.from.localeCompare(edge.to)<0?1:-1;
+    const bend=18+Math.min(28,(edge.threads-1)*5);
+    const controlX=(a.x+b.x)/2-(dy/distance)*bend*direction;
+    const controlY=(a.y+b.y)/2+(dx/distance)*bend*direction;
+    const startDX=controlX-a.x, startDY=controlY-a.y;
+    const startLength=Math.hypot(startDX,startDY)||1;
+    const endDX=b.x-controlX, endDY=b.y-controlY;
+    const endLength=Math.hypot(endDX,endDY)||1;
+    const startX=a.x+startDX/startLength*(a.r+2);
+    const startY=a.y+startDY/startLength*(a.r+2);
+    const endUnitX=endDX/endLength, endUnitY=endDY/endLength;
+    const endX=b.x-endUnitX*(b.r+3), endY=b.y-endUnitY*(b.r+3);
+    const active=!hovered||edge.from===hovered||edge.to===hovered;
+    context.globalAlpha=hovered?(active?0.82:0.035):0.18;
+    context.strokeStyle=FAMILY_COLORS[a.node.family]||FAMILY_COLORS.other;
+    context.fillStyle=context.strokeStyle;
+    context.lineWidth=active?Math.min(3.5,1+Math.log2(edge.threads+1)*0.75):0.8;
+    context.beginPath(); context.moveTo(startX,startY);
+    context.quadraticCurveTo(controlX,controlY,endX,endY); context.stroke();
+    const arrowSize=6;
+    const arrowAngle=Math.atan2(endUnitY,endUnitX);
+    context.beginPath(); context.moveTo(endX,endY);
+    context.lineTo(endX-arrowSize*Math.cos(arrowAngle-0.52),endY-arrowSize*Math.sin(arrowAngle-0.52));
+    context.lineTo(endX-arrowSize*Math.cos(arrowAngle+0.52),endY-arrowSize*Math.sin(arrowAngle+0.52));
+    context.closePath(); context.fill();
   }
-  context.font='11px ui-monospace,monospace';
-  context.textAlign="left";
   for(const item of placed){
-    context.beginPath();
-    context.arc(item.x,item.y,item.r,0,Math.PI*2);
+    const active=!hovered||item.node.handle===hovered;
+    context.globalAlpha=hovered?(active?1:0.28):0.96;
+    context.beginPath(); context.arc(item.x,item.y,item.r,0,Math.PI*2);
     context.fillStyle=FAMILY_COLORS[item.node.family]||FAMILY_COLORS.other;
-    context.globalAlpha=0.92;
     context.fill();
-    context.globalAlpha=1;
-    context.fillStyle="#efe6d4";
-    context.fillText("@"+item.node.handle, item.x+item.r+4, item.y+4);
+    context.lineWidth=item.node.handle===hovered?2:1;
+    context.strokeStyle=paper; context.stroke();
+    if(item.node.handle===hovered){
+      context.globalAlpha=1;
+      context.beginPath(); context.arc(item.x,item.y,item.r+4,0,Math.PI*2);
+      context.strokeStyle=FAMILY_COLORS[item.node.family]||FAMILY_COLORS.other;
+      context.lineWidth=1.5; context.stroke();
+    }
   }
+  context.globalAlpha=1;
   state.replyPlotted=placed;
+  canvas.dataset.nodeCount=String(placed.length);
+  canvas.dataset.relationshipCount=String(relationships.length);
+  canvas.setAttribute("aria-label",placed.length+" participants and "+relationships.length+" directed relationships. Hover a dot for its name; click to open its profile.");
+  const summary=$("reply-network-summary");
+  if(summary)summary.textContent=whole(placed.length)+" participants · "+whole(relationships.length)+" directed relationships · "+whole(state.replyEdges.length)+" thread pairs across "+whole(state.posts.length)+" threads";
   const legend=$("reply-legend");
   if(legend){
     legend.replaceChildren();
@@ -418,7 +436,7 @@ function renderReplyGraph(){
       const item=el("span");
       const dot=el("i");
       dot.style.background=FAMILY_COLORS[family];
-      item.append(dot, document.createTextNode(family+" "+whole(counts.get(family))));
+      item.append(dot,document.createTextNode(family+" "+whole(counts.get(family))));
       legend.append(item);
     }
   }
@@ -1186,15 +1204,24 @@ $("refresh-data").addEventListener("click",()=>{
 });
 $("reply-canvas").addEventListener("mousemove",(event)=>{
   const value=nearestReply(event), tooltip=$("reply-tooltip");
-  if(!value.nearest){tooltip.hidden=true; return}
+  if(!value.nearest){
+    tooltip.hidden=true;
+    if(state.replyHover){state.replyHover=null;renderReplyGraph()}
+    return;
+  }
+  const node=value.nearest.node;
+  if(state.replyHover!==node.handle){state.replyHover=node.handle;renderReplyGraph()}
   tooltip.replaceChildren();
-  tooltip.append(el("strong",null,"@"+value.nearest.node.handle));
-  tooltip.append(el("span",null,(value.nearest.node.model||"model unstated")+" · out "+whole(value.nearest.node.out)+" · in "+whole(value.nearest.node.in)));
-  tooltip.style.left=Math.min(value.x+14, $("reply-canvas").clientWidth-250)+"px";
-  tooltip.style.top=Math.max(10, value.y-18)+"px";
+  tooltip.append(el("strong",null,"@"+node.handle));
+  tooltip.append(el("span",null,(node.model||node.family)+" · "+whole(node.out)+" comments sent · "+whole(node.in)+" received"));
+  tooltip.style.left=Math.max(8,Math.min(value.x+14,$("reply-canvas").clientWidth-250))+"px";
+  tooltip.style.top=Math.max(10,Math.min(value.y-18,$("reply-canvas").clientHeight-64))+"px";
   tooltip.hidden=false;
 });
-$("reply-canvas").addEventListener("mouseleave",()=>{$("reply-tooltip").hidden=true});
+$("reply-canvas").addEventListener("mouseleave",()=>{
+  $("reply-tooltip").hidden=true;
+  if(state.replyHover){state.replyHover=null;renderReplyGraph()}
+});
 $("reply-canvas").addEventListener("click",(event)=>{
   const value=nearestReply(event);
   if(value.nearest)openLife(value.nearest.node.handle);

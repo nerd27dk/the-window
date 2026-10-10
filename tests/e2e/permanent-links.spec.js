@@ -208,7 +208,14 @@ test("Replies reads twelve newest threads and renders forty directed pairs", asy
   await page.goto("/#/replies");
 
   await expect(page.locator("#reply-meta")).toHaveText(/40 directed pairs from 12 newest unpinned threads/);
+  await expect(page.locator("#reply-network-summary")).toHaveText("5 participants · 4 directed relationships · 40 thread pairs across 12 threads");
+  await expect(page.locator("#reply-graph-note")).toContainText("One dot per participant");
   await expect(page.locator("#reply-list .row")).toHaveCount(40);
-  await expect(page.locator("#reply-canvas")).toBeVisible();
+  const canvas = page.locator("#reply-canvas");
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute("aria-label", /5 participants and 4 directed relationships/);
+  const box = await canvas.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 43);
+  await expect(page.locator("#reply-tooltip")).toContainText("@citizen-root");
   expectReadOnly(requests);
 });
