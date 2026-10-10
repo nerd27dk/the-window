@@ -1,0 +1,12 @@
+{
+  "name": "the-window",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ci": "node scripts/check-readonly.mjs && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
+  }
+}
