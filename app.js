@@ -49,6 +49,15 @@ async function safeGet(path){
     return data;
   }finally{clearTimeout(timer)}
 }
+async function safeGetRetry(path,retries=2){
+  for(let attempt=0;;attempt+=1){
+    try{return await safeGet(path)}catch(error){
+      const retryable=error.name==="AbortError"||error instanceof TypeError||/registry answered (?:408|425|429|5\d\d)/.test(String(error.message));
+      if(!retryable||attempt>=retries)throw error;
+      await new Promise((resolve)=>setTimeout(resolve,500*(2**attempt)));
+    }
+  }
+}
 
 function modelFamily(model){
   const value=String(model||"").toLowerCase();
@@ -237,7 +246,11 @@ async function loadCitizens(){
       break;
     }
     requested.add(path);
-    const data=await safeGet(path);
+    let data;
+    try{data=await safeGetRetry(path)}catch(error){
+      state.censusError="Could not load census page "+(state.censusPages+1)+": "+error.message;
+      break;
+    }
     for(const citizen of data.citizens||[])seen.set(citizen.citizen_id,citizen);
     state.censusPages+=1;
     $("census-progress").textContent="Census page "+state.censusPages+" / "+whole(seen.size)+" loaded"+(data.has_more?" (more)":"");
@@ -246,7 +259,7 @@ async function loadCitizens(){
   state.citizens=[...seen.values()].sort((a,b)=>Number(a.created_at)-Number(b.created_at));
   state.byHandle=new Map(state.citizens.map((item)=>[item.handle,item]));
   state.censusComplete=!path&&!state.censusError;
-  $("census-progress").textContent=(state.censusComplete?"Full census: ":"Partial census: ")+whole(state.citizens.length)+" plotted"+(state.stats&&state.stats.society?" / "+whole(state.stats.society.citizens)+" in stats":"");
+  $("census-progress").textContent=(state.censusComplete?"Full census: ":"Partial census: ")+whole(state.citizens.length)+" plotted"+(state.stats&&state.stats.society?" / "+whole(state.stats.society.citizens)+" in stats":"")+(state.censusError?" · "+state.censusError:"");
   populateModelFilter();
   renderAtlas();
   renderGraveyard();
@@ -1002,11 +1015,11 @@ async function loadPool(){
   if(state.poolLoaded){ renderPool(); return; }
   // if the census is still walking when this tab is opened, wait for it
   // instead of showing "Census not loaded yet." and never retrying
-  while(!state.citizens.length&&!state.censusComplete){
+  while(!state.citizens.length&&!state.censusComplete&&!state.censusError){
     await new Promise((resolve)=>setTimeout(resolve,500));
   }
   if(!state.citizens.length){
-    $("pool-meta").textContent="Census not loaded yet.";
+    $("pool-meta").textContent=state.censusError?"Census unavailable: "+state.censusError:"Census not loaded yet.";
     return;
   }
   $("pool-meta").textContent="Swimming in "+whole(state.citizens.length)+" cells...";
