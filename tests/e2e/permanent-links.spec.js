@@ -172,12 +172,12 @@ test("each main section has a stable hash route and navigation opens the selecte
   expectReadOnly(requests);
 });
 
-test("light theme keeps page surfaces and native controls on one palette", async ({ page }) => {
+test("light and dark themes keep page surfaces and native controls on one palette", async ({ page }) => {
   const requests = await mockRegistry(page);
   await page.goto("/");
   await expect(page.locator("#census-list .row")).toHaveCount(5);
 
-  const theme = await page.evaluate(() => {
+  const readTheme = () => page.evaluate(() => {
     const selectors = ["body", ".tabs", ".panel", ".row", ".atlas-stage", ".reply-stage", ".pool-stage", ".tip", "#citizen-search", "select"];
     const surfaces = selectors.map((selector) => {
       const element = document.querySelector(selector);
@@ -193,12 +193,54 @@ test("light theme keeps page surfaces and native controls on one palette", async
     };
   });
 
-  expect(theme.scheme).toBe("light");
-  expect(theme.declaredScheme).toBe("light");
-  expect(theme.background).toBe("#f6f4ef");
-  expect(theme.paper).toBe("#fffefa");
-  expect(new Set(theme.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
-  expect(theme.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+  const dark = await readTheme();
+  expect(dark.scheme).toBe("dark");
+  expect(dark.declaredScheme).toBe("dark");
+  expect(dark.background).toBe("#12110f");
+  expect(dark.paper).toBe("#1c1a16");
+  expect(new Set(dark.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(18, 17, 15)", "rgb(28, 26, 22)"]));
+
+  await page.getByRole("button", { name: "Switch to light theme" }).click();
+  const light = await readTheme();
+  expect(light.scheme).toBe("light");
+  expect(light.declaredScheme).toBe("light");
+  expect(light.background).toBe("#f6f4ef");
+  expect(light.paper).toBe("#fffefa");
+  expect(new Set(light.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
+  expect(light.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+  expectReadOnly(requests);
+});
+
+test("permanent-link controls and the Census roster retain their original geometry", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await expect(page.locator("#census-list .row")).toHaveCount(5);
+
+  const geometry = await page.evaluate(() => {
+    const rect = (selector) => {
+      const element = document.querySelector(selector);
+      const bounds = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return { width: bounds.width, height: bounds.height, fontSize: style.fontSize };
+    };
+    return {
+      tab: rect(".tab"),
+      button: rect("#random-citizen"),
+      link: rect("#open-author"),
+      bodyFont: getComputedStyle(document.body).fontSize,
+      headingFont: getComputedStyle(document.querySelector(".hero h1")).fontSize,
+      rosterMaxHeight: getComputedStyle(document.querySelector("#census-list")).maxHeight,
+      rowHeight: rect("#census-list .row").height
+    };
+  });
+
+  expect(geometry.tab.height).toBeLessThanOrEqual(33);
+  expect(geometry.link.height).toBeCloseTo(geometry.button.height, 0);
+  expect(geometry.bodyFont).toBe("16px");
+  expect(geometry.headingFont).toBe("38.4px");
+  expect(geometry.rosterMaxHeight).toBe("345.6px");
+  expect(geometry.rowHeight).toBeLessThanOrEqual(74);
   expectReadOnly(requests);
 });
 
