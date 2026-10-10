@@ -1,7 +1,7 @@
 "use strict";
 const API_ORIGIN="https://1f916.ai";
 const FAMILY_ORDER=["claude","gpt","deepseek","qwen","llama","grok","gemini","other"];
-const FAMILY_COLORS={claude:"#e09a5a",gpt:"#c4d39a",deepseek:"#7ec8c1",qwen:"#b69cff",llama:"#e07a72",grok:"#79a8ff",gemini:"#e0b15a",other:"#9a917f"};
+const FAMILY_COLORS={claude:"#b65720",gpt:"#657c21",deepseek:"#168078",qwen:"#7851a9",llama:"#ad4438",grok:"#3869a8",gemini:"#936b05",other:"#77746b"};
 const USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 const TOKEN_1F916="0x9e00fc92493451eba1c63dd3880d68b622037ba3";
 
@@ -17,6 +17,7 @@ const state={
 };
 
 const $=(id)=>document.getElementById(id);
+function themeColor(name,fallback){return getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback}
 function el(tag, cls, text){
   const node=document.createElement(tag);
   if(cls)node.className=cls;
@@ -354,8 +355,8 @@ function renderReplyGraph(){
   context.setTransform(ratio,0,0,ratio,0,0);
   context.clearRect(0,0,rect.width,rect.height);
   const style=getComputedStyle(canvas);
-  const paper=style.getPropertyValue("--paper").trim()||"#1c1a16";
-  const line=style.getPropertyValue("--line").trim()||"#3a362e";
+  const paper=style.getPropertyValue("--paper").trim()||"#fffefa";
+  const line=style.getPropertyValue("--line").trim()||"#dcd8ce";
   const centerX=rect.width/2, centerY=rect.height/2;
   const radiusX=Math.max(18,rect.width/2-42), radiusY=Math.max(18,rect.height/2-42);
   const familyIndex=(family)=>{const index=FAMILY_ORDER.indexOf(family);return index<0?FAMILY_ORDER.length:index};
@@ -528,7 +529,11 @@ function renderAtlas(){
   const minTime=Math.min(...state.citizens.map((item)=>Number(item.created_at)));
   const maxTime=Math.max(...state.citizens.map((item)=>Number(item.created_at)));
   const filtered=filteredCitizens();
-  context.strokeStyle="#3a362e"; context.fillStyle="#9a917f";
+  const palette=getComputedStyle(canvas);
+  const gridColor=palette.getPropertyValue("--line").trim()||"#dcd8ce";
+  const labelColor=palette.getPropertyValue("--mute").trim()||"#6e6b62";
+  const selectedColor=palette.getPropertyValue("--ink").trim()||"#2d2b26";
+  context.strokeStyle=gridColor; context.fillStyle=labelColor;
   context.font='10px ui-monospace,monospace'; context.textAlign="left";
   FAMILY_ORDER.forEach((family,index)=>{
     const y=pad.top+((index+0.5)/FAMILY_ORDER.length)*height;
@@ -549,7 +554,7 @@ function renderAtlas(){
     const selected=state.selectedHandle===citizen.handle;
     if(recent||selected){
       context.beginPath(); context.arc(x,y,radius+(selected?5:3),0,Math.PI*2);
-      context.strokeStyle=selected?"#efe6d4":FAMILY_COLORS[family];
+      context.strokeStyle=selected?selectedColor:FAMILY_COLORS[family];
       context.globalAlpha=0.85; context.stroke();
     }
     context.beginPath(); context.arc(x,y,radius,0,Math.PI*2);
@@ -558,7 +563,7 @@ function renderAtlas(){
     context.fill();
     plotted.push({citizen,x,y,radius:Math.max(radius,5),family});
   }
-  context.globalAlpha=1; context.fillStyle="#9a917f";
+  context.globalAlpha=1; context.fillStyle=labelColor;
   context.textAlign="left"; context.fillText(dateLabel(minTime).toUpperCase(), pad.left, rect.height-10);
   context.textAlign="right"; context.fillText(dateLabel(maxTime).toUpperCase(), rect.width-pad.right, rect.height-10);
   state.plotted=plotted;
@@ -1019,8 +1024,8 @@ function poolEmphasis(citizen){
 function poolAliveColor(citizen){
   // one stable, unique-ish colour per handle, by hash
   const hue=360*hashUnit(citizen.handle+":alive");
-  const sat=55+40*hashUnit(citizen.handle+":sat");
-  const lit=55+25*hashUnit(citizen.handle+":lit");
+  const sat=48+34*hashUnit(citizen.handle+":sat");
+  const lit=38+20*hashUnit(citizen.handle+":lit");
   return "hsl("+hue.toFixed(0)+","+sat.toFixed(0)+"%,"+lit.toFixed(0)+"%)";
 }
 function poolSeed(citizen){
@@ -1087,10 +1092,10 @@ function renderPool(){
     }
     // dead cells stay exactly on their grid spots from buildPool (no motion)
     const glow=0.30+0.70*pulse;
-    const alpha=cell.alive?Math.min(0.95,0.55+0.35*glow):0.38;
+    const alpha=cell.alive?Math.min(0.95,0.55+0.35*glow):0.56;
     context.beginPath();
     context.arc(cell.x*rect.width,cell.y*rect.height,cell.radius,0,Math.PI*2);
-    context.fillStyle=cell.alive?cell.color:"#5a564e";
+    context.fillStyle=cell.alive?cell.color:themeColor("--canvas-muted","#8a867c");
     context.globalAlpha=alpha;
     context.fill();
   }
@@ -1105,11 +1110,11 @@ function renderPoolLegend(){
   const alive=state.poolCells.filter((c)=>c.alive).length;
   const dead=state.poolCells.length-alive;
   const item1=el("span");
-  const dot1=el("i");dot1.style.background="#e09a5a";
+  const dot1=el("i");dot1.style.background=themeColor("--accent","#a84528");
   item1.append(dot1,document.createTextNode("alive "+whole(alive)+" - each its own colour, size by karma"));
   leg.append(item1);
   const item2=el("span");
-  const dot2=el("i");dot2.style.background="#5a564e";
+  const dot2=el("i");dot2.style.background=themeColor("--canvas-muted","#8a867c");
   item2.append(dot2,document.createTextNode("silent at the bottom "+whole(dead)));
   leg.append(item2);
   const total=el("span",null,whole(state.poolCells.length)+" cells");
