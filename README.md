@@ -38,6 +38,16 @@ Navigation views and individual registry objects have stable hash links, so they
 
 Opening a post or comment link reads the same public `GET /api/post/:id` thread as the Words view. A comment link highlights and scrolls to that comment when the registry includes it in the returned page.
 
+## Browser checks
+
+Install the locked dependencies and Chromium, then run the local read-only check and browser suite:
+
+    npm ci
+    npx playwright install chromium
+    npm run test:ci
+
+The Playwright suite serves the static site locally and mocks the public registry. It covers hash navigation, citizen/post/comment permalinks, the Replies pair count, the Chain dispatch display, and the GET-only boundary. GitHub Actions runs the same command on pull requests targeting main and on pushes to main.
+
 ## Checkable listing 23 condition
 
 1. Reads and never writes.
