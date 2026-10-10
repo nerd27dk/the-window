@@ -12,7 +12,8 @@ const state={
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
   censusComplete:false,censusPages:0,
   byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,
-  poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0
+  poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0,
+  threadRequest:0,lifeRequest:0
 };
 
 const $=(id)=>document.getElementById(id);
@@ -78,6 +79,107 @@ function hashUnit(text){
   for(let i=0;i<text.length;i+=1){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619)}
   return (hash>>>0)/4294967295;
 }
+const ROUTE_FOR_VIEW={atlas:"census",graveyard:"graveyard",voices:"words",replies:"replies",life:"life",chain:"chain",books:"books",pool:"pool"};
+const VIEW_FOR_ROUTE=Object.fromEntries(Object.entries(ROUTE_FOR_VIEW).map(([view,route])=>[route,view]));
+function routeForLife(handle){return"life/"+encodeURIComponent(handle)}
+function routeForPost(postId,commentId){
+  const route="words/post/"+encodeURIComponent(postId);
+  return commentId==null?route:route+"/comment/"+encodeURIComponent(commentId);
+}
+function permalinkHref(route){
+  const url=new URL(window.location.href);
+  url.hash="/"+route;
+  return url.href;
+}
+function permanentLink(route,label="↗ link"){
+  const link=el("a","text-btn permalink",label);
+  const resolvedRoute=typeof route==="function"?route():route;
+  link.href=permalinkHref(resolvedRoute);
+  link.title="Permanent link · right-click to copy";
+  link.setAttribute("aria-label","Open permanent link");
+  link.addEventListener("click",(event)=>event.stopPropagation());
+  return link;
+}
+function updateSectionPermalinks(){
+  document.querySelectorAll("[data-view-permalink]").forEach((link)=>{
+    const viewName=link.getAttribute("data-view-permalink");
+    const baseRoute=ROUTE_FOR_VIEW[viewName];
+    if(!baseRoute)return;
+    const route=viewName==="atlas"&&state.selectedFamily!=="all"
+      ?baseRoute+"/family/"+encodeURIComponent(state.selectedFamily)
+      :baseRoute;
+    link.href=permalinkHref(route);
+  });
+}
+function addSectionPermalinks(){
+  Object.entries(ROUTE_FOR_VIEW).forEach(([viewName,route])=>{
+    const heading=$("view-"+viewName)?.querySelector(".view-head h2");
+    if(heading){
+      const link=permanentLink(route);
+      link.setAttribute("data-view-permalink",viewName);
+      heading.append(link);
+    }
+  });
+  updateSectionPermalinks();
+}
+function parseLocationRoute(){
+  if(!window.location.hash.startsWith("#/"))return null;
+  const raw=window.location.hash.slice(2);
+  const queryAt=raw.indexOf("?");
+  const path=queryAt<0?raw:raw.slice(0,queryAt);
+  const query=new URLSearchParams(queryAt<0?"":raw.slice(queryAt+1));
+  let parts;
+  try{parts=path.split("/").filter(Boolean).map((part)=>decodeURIComponent(part))}catch(_error){return{view:"atlas"}}
+  const route=parts[0]||"census";
+  const view=VIEW_FOR_ROUTE[route];
+  if(!view)return{view:"atlas"};
+  if(route==="census"){
+    const family=parts[1]==="family"?parts[2]||"all":query.get("family")||"all";
+    return{view,family:FAMILY_ORDER.includes(family)?family:"all"};
+  }
+  if(route==="life"){
+    const handle=parts[1]||null;
+    return{view,handle:handle&&/^[A-Za-z0-9_-]+$/.test(handle)?handle:null};
+  }
+  if(route==="words"&&parts[1]==="post"&&/^\d+$/.test(parts[2]||"")){
+    const commentId=parts[3]==="comment"&&/^\d+$/.test(parts[4]||"")?parts[4]:null;
+    return{view,postId:parts[2],commentId};
+  }
+  return{view};
+}
+function navigateTo(route){
+  const hash="#/"+route;
+  if(window.location.hash===hash)routeFromLocation();
+  else window.location.hash=hash;
+}
+function routeFromLocation(){
+  const route=parseLocationRoute();
+  if(!route)return;
+  state.selectedFamily=route.family||"all";
+  const familyFilter=$("model-filter");
+  if(familyFilter)familyFilter.value=state.selectedFamily;
+  updateSectionPermalinks();
+  showView(route.view);
+  if(route.handle)loadLife(route.handle);
+  else if(route.view==="life"){
+    state.lifeRequest+=1;
+    state.selectedHandle=null;
+    markRoster();
+    $("life-panel").replaceChildren(el("p","empty","No citizen selected. Census, graveyard, a post author, a stranger, or Open pavel-pi."));
+  }else{
+    state.lifeRequest+=1;
+    state.selectedHandle=null;
+    markRoster();
+  }
+  if(route.postId)loadThread(route.postId,route.commentId);
+  else if(route.view==="voices"){
+    state.threadRequest+=1;
+    $("thread-panel").replaceChildren(el("p","empty","No thread open."));
+  }
+  if(!route.commentId&&window.location.hash.startsWith("#/")){
+    window.requestAnimationFrame(()=>$("view-"+route.view)?.scrollIntoView({block:"start"}));
+  }
+}
 function dollars(cents){
   if(cents==null)return "-";
   return (Number(cents)/100).toLocaleString("en-US",{style:"currency",currency:"USD"});
@@ -97,7 +199,12 @@ function tokenAmount(atomic, token){
 
 function showView(name){
   document.querySelectorAll(".view").forEach((node)=>node.classList.toggle("on", node.id==="view-"+name));
-  document.querySelectorAll(".tab").forEach((node)=>node.classList.toggle("on", node.getAttribute("data-view")===name));
+  document.querySelectorAll(".tab").forEach((node)=>{
+    const active=node.getAttribute("data-view")===name;
+    node.classList.toggle("on",active);
+    if(active)node.setAttribute("aria-current","page");
+    else node.removeAttribute("aria-current");
+  });
   if(name==="atlas")renderAtlas();
   if(name==="graveyard")renderGraveyard();
   if(name==="replies")loadReplies();
@@ -141,6 +248,7 @@ async function loadPosts(){
   state.recentAuthors=new Set(state.posts.map((post)=>post.author));
   renderTraces();
   renderAtlas();
+  if($("view-replies").classList.contains("on"))loadReplies();
 }
 async function loadReplies(){
   if(state.replyBusy)return;
@@ -315,7 +423,7 @@ function renderReplyList(){
     mid.append(line);
     mid.append(el("div","muted",(edge.title||"Untitled")+(edge.count>1?" · "+edge.count+" comments":"")));
     row.append(mid);
-    row.append(el("span","muted","thread"));
+    row.append(permanentLink(routeForPost(edge.postId)));
     row.addEventListener("click",()=>openThread(edge.postId));
     list.append(row);
   });
@@ -355,6 +463,14 @@ function populateModelFilter(){
     option.textContent=family.toUpperCase()+" · "+whole(counts.get(family));
     select.append(option);
   }
+  if(state.selectedFamily!=="all"&&!counts.has(state.selectedFamily)){
+    const option=document.createElement("option");
+    option.value=state.selectedFamily;
+    option.textContent=state.selectedFamily.toUpperCase()+" · 0";
+    select.append(option);
+  }
+  select.value=state.selectedFamily;
+  updateSectionPermalinks();
 }
 
 function renderAtlas(){
@@ -430,7 +546,10 @@ function renderRoster(citizens){
     mid.append(el("strong",null,"@"+citizen.handle));
     mid.append(el("div","muted",(citizen.model||"model unstated")+" · joined "+dateLabel(citizen.created_at)));
     row.append(mid);
-    row.append(el("span","muted","karma "+whole(citizen.karma)));
+    const actions=el("div","row-actions");
+    actions.append(el("span","muted","karma "+whole(citizen.karma)));
+    actions.append(permanentLink(routeForLife(citizen.handle)));
+    row.append(actions);
     row.addEventListener("click",()=>openLife(citizen.handle));
     frag.append(row);
   });
@@ -499,7 +618,10 @@ function renderGraveyard(){
     mid.append(el("strong",null,"@"+citizen.handle));
     mid.append(el("div","muted",(citizen.model||"model unstated")+" · joined "+dateLabel(citizen.created_at)));
     row.append(mid);
-    row.append(el("span","muted","open"));
+    const actions=el("div","row-actions");
+    actions.append(el("span","muted","open"));
+    actions.append(permanentLink(routeForLife(citizen.handle)));
+    row.append(actions);
     row.addEventListener("click",()=>openLife(citizen.handle));
     list.append(row);
   });
@@ -520,21 +642,29 @@ function renderTraces(){
     meta.append(author, document.createTextNode(" · "+ageLabel(post.created_at)));
     mid.append(meta);
     row.append(mid);
+    row.append(permanentLink(routeForPost(post.id)));
     row.addEventListener("click",()=>openThread(post.id));
     list.append(row);
   });
 }
 
-async function openThread(id){
-  showView("voices");
+function openThread(id,commentId){
+  if(!/^\d+$/.test(String(id)))return;
+  navigateTo(routeForPost(id,commentId));
+}
+async function loadThread(id,commentId){
+  const requestId=++state.threadRequest;
   const panel=$("thread-panel");
   panel.replaceChildren(el("p","empty","Reading post "+id+"..."));
   try{
     const data=await safeGet("/api/post/"+encodeURIComponent(id));
+    if(requestId!==state.threadRequest)return;
     const post=data.post||{};
     panel.replaceChildren();
     panel.append(el("p","eyebrow","POST "+post.id));
-    panel.append(el("h3",null,post.title||"Untitled"));
+    const title=el("h3",null,post.title||"Untitled");
+    title.append(permanentLink(routeForPost(post.id||id),"↗ post link"));
+    panel.append(title);
     const by=el("p","muted");
     const authorBtn=el("button","text-btn","@"+(post.author||"?"));
     authorBtn.type="button";
@@ -550,22 +680,42 @@ async function openThread(id){
     panel.append(el("p","small-h",whole(data.comments_total||comments.length)+" comments, showing "+whole(comments.length)+(data.has_more?" (truncated)":"")));
     comments.forEach((comment)=>{
       const box=el("div","comment");
+      box.id="comment-"+comment.id;
+      if(String(comment.id)===String(commentId))box.classList.add("comment-target");
       const who=el("button","text-btn","@"+comment.author);
       who.type="button";
       who.addEventListener("click",()=>openLife(comment.author));
-      box.append(who, el("span","muted","  "+ageLabel(comment.created_at)));
+      const commentHead=el("div","comment-head");
+      commentHead.append(who, el("span","muted",ageLabel(comment.created_at)));
+      commentHead.append(permanentLink(routeForPost(post.id||id,comment.id)));
+      box.append(commentHead);
       box.append(el("p",null,comment.body||""));
       panel.append(box);
     });
+    if(commentId){
+      const target=document.getElementById("comment-"+commentId);
+      if(target)window.requestAnimationFrame(()=>target.scrollIntoView({block:"center"}));
+      else{
+        const note=el("p","muted","This comment is not in the comments returned for this thread.");
+        panel.append(note);
+        window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
+      }
+    }
   }catch(error){
+    if(requestId!==state.threadRequest)return;
     panel.replaceChildren(el("p","empty","Thread could not be read: "+error.message));
+    if(commentId)window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
   }
 }
 
-async function openLife(handle){
+function openLife(handle){
   if(!handle)return;
+  navigateTo(routeForLife(handle));
+}
+async function loadLife(handle){
+  if(!handle)return;
+  const requestId=++state.lifeRequest;
   state.selectedHandle=handle;
-  showView("life");
   markRoster();
   const panel=$("life-panel");
   panel.replaceChildren(el("p","empty","Reading @"+handle+"..."));
@@ -574,8 +724,10 @@ async function openLife(handle){
       safeGet("/api/citizen/"+encodeURIComponent(handle)),
       safeGet("/api/record/"+encodeURIComponent(handle))
     ]);
+    if(requestId!==state.lifeRequest)return;
     renderLife(pack[0], pack[1]);
   }catch(error){
+    if(requestId!==state.lifeRequest)return;
     panel.replaceChildren(el("p","empty","Public trail could not be read: "+error.message));
   }
 }
@@ -585,7 +737,9 @@ function renderLife(citizenPage, record){
   const grid=el("div","life-grid");
   const ident=el("div","panel");
   ident.append(el("p","eyebrow","CITIZEN "+(citizen.citizen_id??"?")));
-  ident.append(el("h3",null,"@"+(citizen.handle||"unknown")));
+  const citizenTitle=el("h3",null,"@"+(citizen.handle||"unknown"));
+  if(citizen.handle)citizenTitle.append(permanentLink(routeForLife(citizen.handle)));
+  ident.append(citizenTitle);
   ident.append(el("p","muted",citizen.model||"model unstated"));
   const stats=[
     ["joined", dateLabel(citizen.created_at)],
@@ -627,8 +781,11 @@ function renderLife(citizenPage, record){
     const row=el("div","comment");
     const btn=el("button","text-btn",act.type+" "+act.id);
     btn.type="button";
-    btn.addEventListener("click",()=>openThread(act.postId));
-    row.append(btn, el("span","muted","  "+ageLabel(act.created_at)));
+    btn.addEventListener("click",()=>openThread(act.postId,act.type==="COMMENT"?act.id:null));
+    const actHead=el("div","comment-head");
+    actHead.append(btn,el("span","muted",ageLabel(act.created_at)));
+    actHead.append(permanentLink(routeForPost(act.postId,act.type==="COMMENT"?act.id:null)));
+    row.append(actHead);
     row.append(el("p",null,String(act.title||act.body||"").replace(/\s+/g," ").slice(0,280)));
     trail.append(row);
   });
@@ -922,11 +1079,11 @@ async function refreshAll(){
   }
 }
 
-document.querySelectorAll(".tab").forEach((btn)=>{
-  btn.addEventListener("click",()=>showView(btn.getAttribute("data-view")));
-});
+window.addEventListener("hashchange",routeFromLocation);
 $("model-filter").addEventListener("change",(event)=>{
-  state.selectedFamily=event.target.value; renderAtlas();
+  state.selectedFamily=event.target.value;
+  updateSectionPermalinks();
+  navigateTo(state.selectedFamily==="all"?"census":"census/family/"+encodeURIComponent(state.selectedFamily));
 });
 $("random-citizen").addEventListener("click",()=>{
   if(!state.citizens.length)return;
@@ -934,7 +1091,6 @@ $("random-citizen").addEventListener("click",()=>{
   const pick=pool[Math.floor(Math.random()*pool.length)];
   openLife(pick.handle);
 });
-$("open-author").addEventListener("click",()=>openLife("pavel-pi"));
 $("refresh-data").addEventListener("click",()=>{
   state.docket=null; state.listingDetails=new Map();
   state.replyLoaded=false; state.replyEdges=[]; state.replyNodes=[];
@@ -967,4 +1123,6 @@ $("pool-canvas").addEventListener("mousemove",handlePoolMove);
 $("pool-canvas").addEventListener("mouseleave",()=>{$("pool-tooltip").hidden=true});
 $("pool-canvas").addEventListener("click",handlePoolClick);
 new ResizeObserver(()=>{ if($("view-pool").classList.contains("on")) renderPool(); }).observe($("pool-canvas"));
+addSectionPermalinks();
+routeFromLocation();
 refreshAll();
