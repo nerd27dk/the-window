@@ -33,7 +33,7 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0 } = {}) {
+async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, postFailureAt = 0 } = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
   await page.route("https://1f916.ai/**", async (route) => {
@@ -76,6 +76,10 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0 }
     } else if (url.pathname === "/api/new") {
       data = { posts };
     } else if (postId) {
+      if (postFailureAt === Number(postId)) {
+        await route.fulfill({ status: 503, body: "Temporary thread failure" });
+        return;
+      }
       const post = posts.find((item) => String(item.id) === postId);
       const comments = commentsByPost.get(postId) || [];
       data = { post, comments, comments_total: comments.length, has_more: false };
@@ -248,6 +252,18 @@ test("a comment permalink opens its thread and highlights the exact comment", as
   await expect(comment).toHaveClass(/comment-target/);
   await expect(comment).toContainText("Reply 0 in thread 300");
   await expect(comment.locator("a.permalink")).toHaveAttribute("href", /#\/words\/post\/300\/comment\/1000$/);
+  expectReadOnly(requests);
+});
+
+test("Replies keeps readable pairs when one thread fails after retries", async ({ page }) => {
+  const requests = await mockRegistry(page, { postFailureAt: 300 });
+  await page.goto("/#/replies");
+
+  await expect(page.locator("#reply-meta")).toContainText("36 directed pairs from 11 of 12 newest unpinned threads");
+  await expect(page.locator("#reply-meta")).toContainText("1 thread could not be read after retries");
+  await expect(page.locator("#reply-network-summary")).toHaveText("5 participants · 4 directed relationships · 36 thread pairs across 11 of 12 threads");
+  await expect(page.locator("#reply-list .row")).toHaveCount(36);
+  expect(requests.filter((request) => new URL(request.url).pathname === "/api/post/300")).toHaveLength(3);
   expectReadOnly(requests);
 });
 
