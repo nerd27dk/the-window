@@ -39,7 +39,8 @@ async function mockRegistry(page, {
   postFailureAt = 0,
   bookAddress = null,
   longDirectoryCitizen = false,
-  longGraveCitizen = false
+  longGraveCitizen = false,
+  longWitnessUrl = false
 } = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
@@ -122,7 +123,15 @@ async function mockRegistry(page, {
         }
       };
     } else if (url.pathname === "/api/witnesses") {
-      data = { witnesses: [] };
+      data = {
+        witnesses: longWitnessUrl ? [{
+          id: 1,
+          name: "Long path witness",
+          operator: "long-path-operator",
+          public_key: "test-key",
+          url: "https://raw.githubusercontent.com/Bigocb/1f916-witness/master/protocol-witness/countersignatures.jsonl"
+        }] : []
+      };
     } else if (url.pathname === "/api/docket" || url.pathname === "/api/listings" ||
                url.pathname === "/api/rail" || url.pathname === "/api/official" ||
                url.pathname === "/treasury") {
@@ -217,6 +226,41 @@ test("direct mobile section links place the heading below sticky navigation", as
     expect(positions.headingTop, route + " heading should clear the sticky navigation").toBeGreaterThanOrEqual(positions.navBottom);
   }
 
+  expectReadOnly(requests);
+});
+
+test("Chain witness rows keep long source paths inside the mobile viewport", async ({ page }) => {
+  const requests = await mockRegistry(page, { longWitnessUrl: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/chain");
+
+  const row = page.locator("#witness-list .row");
+  await expect(row).toContainText("countersignatures.jsonl");
+  const geometry = await page.evaluate(() => {
+    const section = document.querySelector("#view-chain");
+    const row = document.querySelector("#witness-list .row");
+    const content = row.children[1];
+    const url = content.querySelectorAll("p")[1];
+    const action = row.querySelector("button");
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      sectionWidth: section.getBoundingClientRect().width,
+      sectionScroll: section.scrollWidth,
+      rowWidth: row.getBoundingClientRect().width,
+      rowScroll: row.scrollWidth,
+      urlWidth: url.getBoundingClientRect().width,
+      urlScroll: url.scrollWidth,
+      actionTop: action.getBoundingClientRect().top,
+      urlBottom: url.getBoundingClientRect().bottom
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.sectionScroll).toBeLessThanOrEqual(geometry.sectionWidth);
+  expect(geometry.rowScroll).toBeLessThanOrEqual(geometry.rowWidth);
+  expect(geometry.urlScroll).toBeLessThanOrEqual(geometry.urlWidth);
+  expect(geometry.actionTop).toBeGreaterThanOrEqual(geometry.urlBottom);
   expectReadOnly(requests);
 });
 

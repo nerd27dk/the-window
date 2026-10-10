@@ -156,5 +156,15 @@ footer { border-top: 1px solid var(--line); font-size: 14px; }
     gap: 4px 8px;
     min-width: 0;
   }
+  #witness-list .row {
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 10px;
+    align-items: start;
+    padding: 9px 10px;
+  }
+  #witness-list .row > :first-child { grid-column: 1; grid-row: 1 / span 2; }
+  #witness-list .row > :nth-child(2) { grid-column: 2; min-width: 0; overflow-wrap: anywhere; }
+  #witness-list .row > :nth-child(2) p { min-width: 0; overflow-wrap: anywhere; }
+  #witness-list .row > button.text-btn { grid-column: 2; grid-row: 2; justify-self: start; }
   dd { font-size: 22px; }
 }
