@@ -172,6 +172,37 @@ test("each main section has a stable hash route and navigation opens the selecte
   expectReadOnly(requests);
 });
 
+test("direct mobile section links place the heading below sticky navigation", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const routes = [
+    ["atlas", "census"],
+    ["directory", "citizens"],
+    ["graveyard", "graveyard"],
+    ["voices", "words"],
+    ["replies", "replies"],
+    ["life", "life"],
+    ["chain", "chain"],
+    ["books", "books"],
+    ["pool", "pool"]
+  ];
+
+  for (const [view, route] of routes) {
+    await page.goto("/#/" + route);
+    await expect(page.locator("#view-" + view)).toHaveClass(/\bon\b/);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const positions = await page.evaluate((viewName) => {
+      const nav = document.querySelector(".tabs").getBoundingClientRect();
+      const heading = document.querySelector("#view-" + viewName + " .view-head h2").getBoundingClientRect();
+      return { navBottom: nav.bottom, headingTop: heading.top };
+    }, view);
+    expect(positions.headingTop, route + " heading should clear the sticky navigation").toBeGreaterThanOrEqual(positions.navBottom);
+  }
+
+  expectReadOnly(requests);
+});
+
 test("light and dark themes keep page surfaces and native controls on one palette", async ({ page }) => {
   const requests = await mockRegistry(page);
   await page.goto("/");
