@@ -134,12 +134,15 @@ canvas { width: 100%; height: 100%; display: block; }
 .life-activity-title { font-weight: 600; margin: 8px 0 4px; }
 .life-activity-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
 .comment-target { border-top-color: var(--accent); border-left: 2px solid var(--accent); padding-left: 8px; }
-.life-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+.life-grid { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 16px; min-width: 0; }
+.life-grid > .panel { min-width: 0; }
+.life-key { overflow-wrap: anywhere; }
 .stat-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
 #request-log { padding-left: 18px; color: var(--mute); font-size: 13px; }
 footer { border-top: 1px solid var(--line); font-size: 14px; }
 @media (max-width: 800px) {
-  .measures, .split, .chain-grid, .proof-grid, .life-grid, .view-head { grid-template-columns: 1fr; }
+  .measures, .split, .chain-grid, .proof-grid, .view-head { grid-template-columns: 1fr; }
+  .life-grid { grid-template-columns: minmax(0, 1fr); }
   #directory-list .row, #grave-list .row {
     grid-template-columns: max-content minmax(0, 1fr);
     gap: 4px 10px;

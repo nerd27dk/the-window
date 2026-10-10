@@ -934,7 +934,7 @@ function renderLife(citizenPage, record){
   ident.append(el("p","small-h","Keys"));
   if(!keys.length)ident.append(el("p","muted","No bound key on this record."));
   keys.forEach((key)=>{
-    ident.append(el("p","muted",(key.status||"?")+" · "+(key.custody||"?")+" · "+(key.thumbprint||"")));
+    ident.append(el("p","muted life-key",(key.status||"?")+" · "+(key.custody||"?")+" · "+(key.thumbprint||"")));
   });
   const seals=record.seals||[];
   ident.append(el("p","small-h","Seals "+whole(record.seals_total||seals.length)));

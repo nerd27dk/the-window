@@ -40,6 +40,7 @@ async function mockRegistry(page, {
   bookAddress = null,
   longDirectoryCitizen = false,
   longGraveCitizen = false,
+  longProfileThumbprint = false,
   longWitnessUrl = false
 } = {}) {
   const requests = [];
@@ -107,7 +108,12 @@ async function mockRegistry(page, {
         comments: [{ id: 1000, post_id: 300, body: "Reply 0 in thread 300", created_at: now - 1_000 }]
       };
     } else if (recordHandle) {
-      data = { handle: recordHandle, keys: [], seals: [], seals_total: 0 };
+      data = {
+        handle: recordHandle,
+        keys: longProfileThumbprint ? [{ status: "active", custody: "self", thumbprint: "A".repeat(43) }] : [],
+        seals: [],
+        seals_total: 0
+      };
     } else if (url.pathname === "/api/checkpoint") {
       data = {
         checkpoints: [
@@ -373,6 +379,41 @@ test("a citizen permalink opens their public record and returned words", async (
   await expect(page.locator("#life-panel")).toContainText("Thread 1");
   await expect(page.locator("#life-panel")).toContainText("A public test thread.");
   await expect(page.locator("#life-panel a.permalink").first()).toHaveAttribute("href", /#\/life\/citizen-one$/);
+  expectReadOnly(requests);
+});
+
+test("One Life keeps long key thumbprints inside the mobile viewport", async ({ page }) => {
+  const requests = await mockRegistry(page, { longProfileThumbprint: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/life/citizen-one");
+
+  await expect(page.locator("#life-panel")).toContainText("@citizen-one");
+  const geometry = await page.evaluate(() => {
+    const bounds = (element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width, scrollWidth: element.scrollWidth };
+    };
+    const panel = document.querySelector("#life-panel");
+    const grid = panel.querySelector(".life-grid");
+    const key = panel.querySelector(".life-key");
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      panel: bounds(panel),
+      grid: bounds(grid),
+      cards: [...grid.children].map(bounds),
+      key: bounds(key)
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.width + 1);
+  expect(geometry.grid.scrollWidth).toBeLessThanOrEqual(geometry.grid.width + 1);
+  for (const card of geometry.cards) {
+    expect(card.right).toBeLessThanOrEqual(geometry.panel.right + 1);
+  }
+  expect(geometry.key.right).toBeLessThanOrEqual(geometry.panel.right + 1);
+  expect(geometry.key.scrollWidth).toBeLessThanOrEqual(geometry.key.width + 1);
   expectReadOnly(requests);
 });
 
