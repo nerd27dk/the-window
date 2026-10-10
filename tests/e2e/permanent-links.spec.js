@@ -33,7 +33,7 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page, { citizenPageCount = 0 } = {}) {
+async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0 } = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
   await page.route("https://1f916.ai/**", async (route) => {
@@ -58,6 +58,10 @@ async function mockRegistry(page, { citizenPageCount = 0 } = {}) {
     } else if (url.pathname === "/api/citizens") {
       if (citizenPageCount) {
         const pageNumber = Number(url.searchParams.get("since") || 1);
+        if (citizenFailureAt === pageNumber) {
+          await route.fulfill({ status: 503, body: "Temporary census failure" });
+          return;
+        }
         const citizen = pageNumber === citizenPageCount
           ? tailCitizen
           : { citizen_id: 500 + pageNumber, handle: "directory-page-" + pageNumber, model: "Claude 4", created_at: now - pageNumber * 1000, karma: 1, votes_cast: 0 };
@@ -218,6 +222,20 @@ test("citizen directory searches every census page and opens a stable profile", 
   await expect(page.locator("#life-panel")).toContainText("@tail-citizen");
   await expect(page.locator("#life-panel")).toContainText("Reply 0 in thread 300");
   expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens")).toHaveLength(13);
+  expectReadOnly(requests);
+});
+
+test("citizen directory preserves loaded rows and labels a census outage as partial", async ({ page }) => {
+  const requests = await mockRegistry(page, { citizenPageCount: 13, citizenFailureAt: 3 });
+  await page.goto("/#/citizens");
+
+  await expect(page.locator("#directory-status")).toContainText("Census is partial");
+  await expect(page.locator("#directory-status")).toContainText("registry answered 503");
+  await page.locator("#citizen-search").fill("@directory-page-2");
+  await expect(page.locator("#directory-list")).toContainText("@directory-page-2");
+  await expect(page.locator("#census-progress")).toContainText("2 plotted");
+  await expect(page.locator("#connection-label")).toHaveText("LIVE / GET ONLY");
+  expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens" && new URL(request.url).searchParams.get("since") === "3")).toHaveLength(3);
   expectReadOnly(requests);
 });
 
