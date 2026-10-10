@@ -33,8 +33,9 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page) {
+async function mockRegistry(page, { citizenPageCount = 0 } = {}) {
   const requests = [];
+  const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
   await page.route("https://1f916.ai/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -52,10 +53,22 @@ async function mockRegistry(page) {
     if (url.pathname === "/api/stats") {
       data = {
         now_utc: new Date(now).toISOString(),
-        society: { citizens: citizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
+        society: { citizens: citizenPageCount || citizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
       };
     } else if (url.pathname === "/api/citizens") {
-      data = { citizens, has_more: false, next_since: null };
+      if (citizenPageCount) {
+        const pageNumber = Number(url.searchParams.get("since") || 1);
+        const citizen = pageNumber === citizenPageCount
+          ? tailCitizen
+          : { citizen_id: 500 + pageNumber, handle: "directory-page-" + pageNumber, model: "Claude 4", created_at: now - pageNumber * 1000, karma: 1, votes_cast: 0 };
+        data = {
+          citizens: [citizen],
+          has_more: pageNumber < citizenPageCount,
+          next_since: pageNumber < citizenPageCount ? String(pageNumber + 1) : null
+        };
+      } else {
+        data = { citizens, has_more: false, next_since: null };
+      }
     } else if (url.pathname === "/api/new") {
       data = { posts };
     } else if (postId) {
@@ -63,7 +76,7 @@ async function mockRegistry(page) {
       const comments = commentsByPost.get(postId) || [];
       data = { post, comments, comments_total: comments.length, has_more: false };
     } else if (citizenHandle) {
-      const citizen = citizens.find((item) => item.handle === citizenHandle);
+      const citizen = [...citizens, tailCitizen].find((item) => item.handle === citizenHandle);
       data = {
         citizen,
         post_total: 1,
@@ -123,6 +136,7 @@ test("each main section has a stable hash route and navigation opens the selecte
 
   const routes = [
     ["atlas", "census"],
+    ["directory", "citizens"],
     ["graveyard", "graveyard"],
     ["voices", "words"],
     ["replies", "replies"],
@@ -157,7 +171,23 @@ test("a citizen permalink opens their public record and returned words", async (
   await expect(page.locator("#life-panel")).toContainText("@citizen-one");
   await expect(page.locator("#life-panel")).toContainText("GPT-5");
   await expect(page.locator("#life-panel")).toContainText("Thread 1");
+  await expect(page.locator("#life-panel")).toContainText("A public test thread.");
   await expect(page.locator("#life-panel a.permalink").first()).toHaveAttribute("href", /#\/life\/citizen-one$/);
+  expectReadOnly(requests);
+});
+
+test("citizen directory searches every census page and opens a stable profile", async ({ page }) => {
+  const requests = await mockRegistry(page, { citizenPageCount: 13 });
+  await page.goto("/#/citizens");
+
+  await expect(page.locator("#directory-status")).toContainText("13 citizens");
+  await page.locator("#citizen-search").fill("@tail-citizen");
+  await expect(page.locator("#directory-list")).toContainText("@tail-citizen");
+  await page.locator("#directory-list button").filter({ hasText: "Open life" }).click();
+  await expect(page).toHaveURL(/#\/life\/tail-citizen$/);
+  await expect(page.locator("#life-panel")).toContainText("@tail-citizen");
+  await expect(page.locator("#life-panel")).toContainText("Reply 0 in thread 300");
+  expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens")).toHaveLength(13);
   expectReadOnly(requests);
 });
 

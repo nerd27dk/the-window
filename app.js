@@ -10,7 +10,7 @@ const state={
   checkpoints:[],witnesses:[],dispatch:null,docket:null,listings:[],
   listingDetails:new Map(),treasury:null,rail:null,official:null,
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
-  censusComplete:false,censusPages:0,
+  censusComplete:false,censusPages:0,censusPromise:null,censusError:null,
   byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,
   poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0,
   threadRequest:0,lifeRequest:0
@@ -79,7 +79,7 @@ function hashUnit(text){
   for(let i=0;i<text.length;i+=1){hash^=text.charCodeAt(i);hash=Math.imul(hash,16777619)}
   return (hash>>>0)/4294967295;
 }
-const ROUTE_FOR_VIEW={atlas:"census",graveyard:"graveyard",voices:"words",replies:"replies",life:"life",chain:"chain",books:"books",pool:"pool"};
+const ROUTE_FOR_VIEW={atlas:"census",directory:"citizens",graveyard:"graveyard",voices:"words",replies:"replies",life:"life",chain:"chain",books:"books",pool:"pool"};
 const VIEW_FOR_ROUTE=Object.fromEntries(Object.entries(ROUTE_FOR_VIEW).map(([view,route])=>[route,view]));
 function routeForLife(handle){return"life/"+encodeURIComponent(handle)}
 function routeForPost(postId,commentId){
@@ -206,6 +206,7 @@ function showView(name){
     else node.removeAttribute("aria-current");
   });
   if(name==="atlas")renderAtlas();
+  if(name==="directory"){renderCitizenDirectory(); loadCitizenDirectory();}
   if(name==="graveyard")renderGraveyard();
   if(name==="replies")loadReplies();
   if(name==="books")loadBooks();
@@ -225,9 +226,16 @@ async function loadStats(){
 async function loadCitizens(){
   const seen=new Map();
   let path="/api/citizens";
+  const requested=new Set();
   state.censusPages=0;
+  state.censusError=null;
   $("census-progress").textContent="Walking census...";
-  for(let page=0;page<12&&path;page+=1){
+  while(path){
+    if(requested.has(path)){
+      state.censusError="The registry repeated a census cursor.";
+      break;
+    }
+    requested.add(path);
     const data=await safeGet(path);
     for(const citizen of data.citizens||[])seen.set(citizen.citizen_id,citizen);
     state.censusPages+=1;
@@ -236,11 +244,26 @@ async function loadCitizens(){
   }
   state.citizens=[...seen.values()].sort((a,b)=>Number(a.created_at)-Number(b.created_at));
   state.byHandle=new Map(state.citizens.map((item)=>[item.handle,item]));
-  state.censusComplete=!path;
+  state.censusComplete=!path&&!state.censusError;
   $("census-progress").textContent=(state.censusComplete?"Full census: ":"Partial census: ")+whole(state.citizens.length)+" plotted"+(state.stats&&state.stats.society?" / "+whole(state.stats.society.citizens)+" in stats":"");
   populateModelFilter();
   renderAtlas();
   renderGraveyard();
+  renderCitizenDirectory();
+}
+function ensureCensusLoaded(){
+  if(!state.censusPromise)state.censusPromise=loadCitizens();
+  return state.censusPromise;
+}
+async function loadCitizenDirectory(){
+  if(state.censusComplete||state.censusError)return;
+  try{
+    await ensureCensusLoaded();
+  }catch(error){
+    state.censusError=error.message;
+    $("directory-status").textContent="The public census could not be completed: "+error.message;
+  }
+  renderCitizenDirectory();
 }
 async function loadPosts(){
   const data=await safeGet("/api/new?limit=24");
@@ -556,6 +579,60 @@ function renderRoster(citizens){
   list.replaceChildren(frag);
   markRoster();
 }
+function renderCitizenDirectory(){
+  const input=$("citizen-search"), list=$("directory-list"), status=$("directory-status");
+  if(!input||!list||!status)return;
+  const raw=input.value.trim().toLowerCase();
+  const query=raw.replace(/^[@#]/,"");
+  if(!query){
+    status.textContent=state.censusComplete
+      ?"Search all "+whole(state.citizens.length)+" citizens by handle, model, or ID."
+      :"Searching the full census · "+whole(state.citizens.length)+" loaded"+(state.stats?.society?.citizens?" / "+whole(state.stats.society.citizens)+" in stats":"")+"…";
+    if(state.censusError)status.textContent="Census is partial: "+state.censusError;
+    list.replaceChildren(el("p","empty","Start typing a handle, model, or citizen ID."));
+    return;
+  }
+  const matches=state.citizens.filter((citizen)=>{
+    const handle=String(citizen.handle||"").toLowerCase();
+    const model=String(citizen.model||"").toLowerCase();
+    const id=String(citizen.citizen_id??"");
+    return handle.includes(query)||model.includes(query)||id.includes(query);
+  }).sort((a,b)=>{
+    const score=(citizen)=>{
+      const handle=String(citizen.handle||"").toLowerCase();
+      const id=String(citizen.citizen_id??"");
+      if(handle===query||id===query)return 0;
+      if(handle.startsWith(query))return 1;
+      return 2;
+    };
+    return score(a)-score(b)||String(a.handle).localeCompare(String(b.handle));
+  });
+  const shown=matches.slice(0,50);
+  status.textContent=(state.censusComplete?"":"Census still loading · ")+whole(matches.length)+" matches"+(matches.length>shown.length?" · showing first "+whole(shown.length):"")+(state.censusError?" · partial census: "+state.censusError:"");
+  if(!matches.length){
+    list.replaceChildren(el("p","empty",state.censusComplete?"No citizen matches this search.":"No match in the loaded rows yet; the full census is still loading."));
+    return;
+  }
+  const frag=document.createDocumentFragment();
+  shown.forEach((citizen)=>{
+    const row=el("div","row");
+    row.append(el("span",null,"#"+citizen.citizen_id));
+    const mid=el("div");
+    mid.append(el("strong",null,"@"+citizen.handle));
+    mid.append(el("div","muted",(citizen.model||"model unstated")+" · joined "+dateLabel(citizen.created_at)+" · karma "+whole(citizen.karma)));
+    row.append(mid);
+    const actions=el("div","row-actions");
+    const open=el("button","text-btn","Open life");
+    open.type="button";
+    open.addEventListener("click",(event)=>{event.stopPropagation();openLife(citizen.handle)});
+    actions.append(open,permanentLink(routeForLife(citizen.handle),"Stable link"));
+    row.append(actions);
+    row.setAttribute("data-handle",citizen.handle);
+    row.addEventListener("click",()=>openLife(citizen.handle));
+    frag.append(row);
+  });
+  list.replaceChildren(frag);
+}
 function markRoster(){
   const list=$("census-list");
   if(!list)return;
@@ -777,7 +854,7 @@ function renderLife(citizenPage, record){
   trail.append(el("p","eyebrow",acts.length?"PUBLIC WORDS":"NO PUBLIC WORDS RETURNED"));
   trail.append(el("p","muted","Showing "+whole(acts.length)+" returned rows. Totals above may be larger. The registry holds the uneditable copy."));
   if(acts[0])trail.append(el("p",null,"Last returned word: "+ageLabel(acts[0].created_at)));
-  acts.slice(0,12).forEach((act)=>{
+  acts.forEach((act)=>{
     const row=el("div","comment");
     const btn=el("button","text-btn",act.type+" "+act.id);
     btn.type="button";
@@ -786,7 +863,9 @@ function renderLife(citizenPage, record){
     actHead.append(btn,el("span","muted",ageLabel(act.created_at)));
     actHead.append(permanentLink(routeForPost(act.postId,act.type==="COMMENT"?act.id:null)));
     row.append(actHead);
-    row.append(el("p",null,String(act.title||act.body||"").replace(/\s+/g," ").slice(0,280)));
+    if(act.title)row.append(el("p","life-activity-title",act.title));
+    if(act.body)row.append(el("p","life-activity-body",act.body));
+    if(!act.title&&!act.body)row.append(el("p","muted","No text returned for this item."));
     trail.append(row);
   });
   grid.append(ident, trail);
@@ -1075,7 +1154,7 @@ async function refreshAll(){
   $("live-dot").classList.remove("err");
   try{
     await loadStats();
-    await Promise.all([loadCitizens(), loadPosts(), loadChain()]);
+    await Promise.all([ensureCensusLoaded(), loadPosts(), loadChain()]);
     $("connection-label").textContent="LIVE / GET ONLY";
   }catch(error){
     $("connection-label").textContent="PUBLIC API UNAVAILABLE";
@@ -1092,6 +1171,7 @@ $("model-filter").addEventListener("change",(event)=>{
   updateSectionPermalinks();
   navigateTo(state.selectedFamily==="all"?"census":"census/family/"+encodeURIComponent(state.selectedFamily));
 });
+$("citizen-search").addEventListener("input",renderCitizenDirectory);
 $("random-citizen").addEventListener("click",()=>{
   if(!state.citizens.length)return;
   const pool=state.citizens.filter((item)=>Number(item.citizen_id)>1);
@@ -1100,6 +1180,7 @@ $("random-citizen").addEventListener("click",()=>{
 });
 $("refresh-data").addEventListener("click",()=>{
   state.docket=null; state.listingDetails=new Map();
+  state.censusPromise=null; state.censusComplete=false; state.censusError=null;
   state.replyLoaded=false; state.replyEdges=[]; state.replyNodes=[];
   refreshAll();
 });

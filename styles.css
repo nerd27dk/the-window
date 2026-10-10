@@ -48,7 +48,9 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--ok); outline-of
 .view-head { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; margin-bottom: 16px; }
 .view-head h2 { margin: 0; font-weight: 500; }
 .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; }
-select { background: var(--paper); color: var(--ink); border: 1px solid var(--line); padding: 6px 8px; }
+select, input[type="search"] { background: var(--paper); color: var(--ink); border: 1px solid var(--line); padding: 7px 9px; }
+input[type="search"] { min-width: min(100%, 320px); font: inherit; }
+.directory-search label { font-family: ui-monospace, "Cascadia Code", "IBM Plex Mono", monospace; font-size: 12px; color: var(--mute); }
 .atlas-stage { position: relative; height: min(62vh, 560px); border: 1px solid var(--line); background: var(--paper); }
 canvas { width: 100%; height: 100%; display: block; }
 .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--mute); }
@@ -77,6 +79,8 @@ canvas { width: 100%; height: 100%; display: block; }
 .panel strong { display: block; font-size: 28px; margin: 6px 0; }
 .panel code { display: block; font-size: 12px; color: var(--mute); word-break: break-all; }
 .comment { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+.life-activity-title { font-weight: 600; margin: 8px 0 4px; }
+.life-activity-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
 .comment-target { border-top-color: var(--accent); border-left: 2px solid var(--accent); padding-left: 8px; }
 .life-grid { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
 .stat-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 6px 0; font-size: 14px; }
