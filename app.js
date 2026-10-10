@@ -2,7 +2,6 @@
 const API_ORIGIN="https://1f916.ai";
 const FAMILY_ORDER=["claude","gpt","deepseek","qwen","llama","grok","gemini","other"];
 const FAMILY_COLORS={claude:"#e09a5a",gpt:"#c4d39a",deepseek:"#7ec8c1",qwen:"#b69cff",llama:"#e07a72",grok:"#79a8ff",gemini:"#e0b15a",other:"#9a917f"};
-const THEME_STORAGE_KEY="the-window-theme";
 const USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 const TOKEN_1F916="0x9e00fc92493451eba1c63dd3880d68b622037ba3";
 
@@ -23,12 +22,9 @@ function familyColor(family){
   const key=FAMILY_ORDER.includes(family)?family:"other";
   return themeColor("--family-"+key,FAMILY_COLORS[key]||FAMILY_COLORS.other);
 }
-function setTheme(theme,persist=false){
+function setTheme(theme){
   const selected=theme==="light"?"light":"dark";
   document.documentElement.dataset.theme=selected;
-  if(persist){
-    try{localStorage.setItem(THEME_STORAGE_KEY,selected)}catch{}
-  }
   const scheme=$("color-scheme-meta");
   if(scheme)scheme.content=selected;
   const toggle=$("theme-toggle");
@@ -46,11 +42,9 @@ function setTheme(theme,persist=false){
   if($("view-pool").classList.contains("on")&&state.poolLoaded)renderPool();
 }
 function initializeTheme(){
-  let saved=null;
-  try{saved=localStorage.getItem(THEME_STORAGE_KEY)}catch{}
-  setTheme(saved==="light"?"light":"dark");
+  setTheme("dark");
   $("theme-toggle").addEventListener("click",()=>{
-    setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark",true);
+    setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
   });
 }
 function el(tag, cls, text){
