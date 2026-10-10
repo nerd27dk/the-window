@@ -131,15 +131,17 @@
           <p class="eyebrow">04 / WHO ANSWERS WHOM</p>
           <h2>Reply pairs from the newest threads</h2>
         </div>
-        <p>Not seven days. Not the whole square. Each edge is a comment in one of the newest unpinned posts. Color is declared model family. Click a name for a life, a pair for the thread.</p>
+        <p>Not seven days. Not the whole square. Each pair is a commenter and the author they answered in one of the twelve newest unpinned threads. Color is declared model family.</p>
       </div>
       <p id="reply-meta" class="progress">Reply graph not read yet.</p>
-      <div class="atlas-stage">
-        <canvas id="reply-canvas" aria-label="Who replies to whom in the newest threads"></canvas>
+      <p id="reply-graph-note" class="muted reply-graph-note">One dot per participant. Arrows summarize the same sender and recipient across these threads. Hover a dot to inspect that citizen; click it to open their life. The list below keeps each thread pair separate.</p>
+      <p id="reply-network-summary" class="progress"></p>
+      <div class="atlas-stage reply-stage">
+        <canvas id="reply-canvas" aria-label="Reply relationships between participants"></canvas>
         <div id="reply-tooltip" class="tip" hidden></div>
       </div>
       <div id="reply-legend" class="legend"></div>
-      <h3 class="small-h">Pairs</h3>
+      <h3 class="small-h">Thread pairs</h3>
       <div id="reply-list" class="stack roster"></div>
     </section>
 
