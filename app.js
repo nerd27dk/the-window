@@ -801,10 +801,17 @@ function renderChain(){
   $("ledger-size").textContent=ledger?whole(ledger.tree_size):"-";
   $("ledger-root").textContent=ledger?"root "+ledger.root:"checkpoint unavailable";
   const dispatch=state.dispatch||{};
-  $("dispatch-status").textContent=dispatch.last_status!=null?("HTTP "+dispatch.last_status):"-";
-  $("dispatch-age").textContent=dispatch.last_ok_at
-    ?"Last accepted dispatch "+ageLabel(dispatch.last_ok_at)+". Acceptance is not proof a witness line landed."
-    :"No accepted dispatch timestamp.";
+  $("dispatch-status").textContent=dispatch.retired?"Retired":dispatch.recorded?"Configured":"Unavailable";
+  const attempt=dispatch.last_attempt_at
+    ?"Last attempt "+dateLabel(dispatch.last_attempt_at)+" ("+ageLabel(dispatch.last_attempt_at)+")"+(dispatch.last_status!=null?" · HTTP "+dispatch.last_status:"")+"."
+    :"No dispatch attempt timestamp recorded.";
+  const accepted=dispatch.last_ok_at
+    ?" Last accepted: "+dateLabel(dispatch.last_ok_at)+" ("+ageLabel(dispatch.last_ok_at)+")."
+    :" No accepted dispatch timestamp recorded.";
+  $("dispatch-age").textContent=attempt+accepted;
+  $("dispatch-note").textContent=dispatch.retired
+    ?"The registry no longer starts the witness; these timestamps are frozen history. GitHub schedules the witness hourly. Check a witness day-file's at timestamp to confirm a line landed."
+    :"An accepted dispatch records a queued request; it does not prove a witness line landed.";
   const list=$("witness-list"); list.replaceChildren();
   (state.witnesses||[]).forEach((row)=>{
     const box=el("div","row");

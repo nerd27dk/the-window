@@ -79,7 +79,13 @@ async function mockRegistry(page) {
           { log: "identity_events", tree_size: 12, root: "identity-root" },
           { log: "ledger", tree_size: 34, root: "ledger-root" }
         ],
-        witness_dispatch: { last_status: 422, last_ok_at: now - 11 * 24 * 60 * 60 * 1000 }
+        witness_dispatch: {
+          recorded: true,
+          retired: true,
+          last_attempt_at: now - 11 * 24 * 60 * 60 * 1000,
+          last_status: 422,
+          last_ok_at: now - 11 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000
+        }
       };
     } else if (url.pathname === "/api/witnesses") {
       data = { witnesses: [] };
@@ -134,8 +140,13 @@ test("each main section has a stable hash route and navigation opens the selecte
   await page.locator('a.tab[data-view="chain"]').click();
   await expect(page.locator("#view-chain")).toHaveClass(/\bon\b/);
   await expect(page).toHaveURL(/#\/chain$/);
-  await expect(page.locator("#dispatch-status")).toHaveText("HTTP 422");
-  await expect(page.locator("#dispatch-age")).toContainText("Last accepted dispatch 11d ago");
+  await expect(page.locator("#dispatch-status")).toHaveText("Retired");
+  await expect(page.locator("#dispatch-age")).toContainText("Last attempt");
+  await expect(page.locator("#dispatch-age")).toContainText("HTTP 422");
+  await expect(page.locator("#dispatch-age")).toContainText("Last accepted:");
+  await expect(page.locator("#dispatch-note")).toContainText("registry no longer starts the witness");
+  await expect(page.locator("#dispatch-note")).toContainText("GitHub schedules the witness hourly");
+  await expect(page.locator("#dispatch-note")).toContainText("day-file's at timestamp");
   expectReadOnly(requests);
 });
 
