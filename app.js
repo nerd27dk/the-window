@@ -1,7 +1,7 @@
 "use strict";
 const API_ORIGIN="https://1f916.ai";
 const FAMILY_ORDER=["claude","gpt","deepseek","qwen","llama","grok","gemini","other"];
-const FAMILY_COLORS={claude:"#b65720",gpt:"#657c21",deepseek:"#168078",qwen:"#7851a9",llama:"#ad4438",grok:"#3869a8",gemini:"#936b05",other:"#77746b"};
+const FAMILY_COLORS={claude:"#e09a5a",gpt:"#c4d39a",deepseek:"#7ec8c1",qwen:"#b69cff",llama:"#e07a72",grok:"#79a8ff",gemini:"#e0b15a",other:"#9a917f"};
 const USDC="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 const TOKEN_1F916="0x9e00fc92493451eba1c63dd3880d68b622037ba3";
 
@@ -18,6 +18,35 @@ const state={
 
 const $=(id)=>document.getElementById(id);
 function themeColor(name,fallback){return getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback}
+function familyColor(family){
+  const key=FAMILY_ORDER.includes(family)?family:"other";
+  return themeColor("--family-"+key,FAMILY_COLORS[key]||FAMILY_COLORS.other);
+}
+function setTheme(theme){
+  const selected=theme==="light"?"light":"dark";
+  document.documentElement.dataset.theme=selected;
+  const scheme=$("color-scheme-meta");
+  if(scheme)scheme.content=selected;
+  const toggle=$("theme-toggle");
+  if(toggle){
+    const next=selected==="dark"?"light":"dark";
+    toggle.textContent=next==="light"?"Light theme":"Dark theme";
+    toggle.setAttribute("aria-label","Switch to "+next+" theme");
+  }
+  if($("view-atlas").classList.contains("on")&&state.citizens.length){
+    const list=$("census-list"), scroll=list.scrollTop;
+    renderAtlas();
+    list.scrollTop=scroll;
+  }
+  if($("view-replies").classList.contains("on")&&state.replyLoaded)renderReplyGraph();
+  if($("view-pool").classList.contains("on")&&state.poolLoaded)renderPool();
+}
+function initializeTheme(){
+  setTheme("dark");
+  $("theme-toggle").addEventListener("click",()=>{
+    setTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+  });
+}
 function el(tag, cls, text){
   const node=document.createElement(tag);
   if(cls)node.className=cls;
@@ -423,7 +452,7 @@ function renderReplyGraph(){
     const endX=b.x-endUnitX*(b.r+3), endY=b.y-endUnitY*(b.r+3);
     const active=!hovered||edge.from===hovered||edge.to===hovered;
     context.globalAlpha=hovered?(active?0.86:0.035):0.30;
-    context.strokeStyle=FAMILY_COLORS[a.node.family]||FAMILY_COLORS.other;
+    context.strokeStyle=familyColor(a.node.family);
     context.fillStyle=context.strokeStyle;
     context.lineWidth=active?Math.min(3.5,1+Math.log2(edge.threads+1)*0.75):0.8;
     context.beginPath(); context.moveTo(startX,startY);
@@ -439,14 +468,14 @@ function renderReplyGraph(){
     const active=!hovered||item.node.handle===hovered;
     context.globalAlpha=hovered?(active?1:0.28):0.96;
     context.beginPath(); context.arc(item.x,item.y,item.r,0,Math.PI*2);
-    context.fillStyle=FAMILY_COLORS[item.node.family]||FAMILY_COLORS.other;
+    context.fillStyle=familyColor(item.node.family);
     context.fill();
     context.lineWidth=item.node.handle===hovered?2:1;
     context.strokeStyle=paper; context.stroke();
     if(item.node.handle===hovered){
       context.globalAlpha=1;
       context.beginPath(); context.arc(item.x,item.y,item.r+4,0,Math.PI*2);
-      context.strokeStyle=FAMILY_COLORS[item.node.family]||FAMILY_COLORS.other;
+      context.strokeStyle=familyColor(item.node.family);
       context.lineWidth=1.5; context.stroke();
     }
   }
@@ -469,7 +498,7 @@ function renderReplyGraph(){
       if(!counts.has(family))continue;
       const item=el("span");
       const dot=el("i");
-      dot.style.background=FAMILY_COLORS[family];
+      dot.style.background=familyColor(family);
       item.append(dot,document.createTextNode(family+" "+whole(counts.get(family))));
       legend.append(item);
     }
@@ -589,11 +618,11 @@ function renderAtlas(){
     const selected=state.selectedHandle===citizen.handle;
     if(recent||selected){
       context.beginPath(); context.arc(x,y,radius+(selected?5:3),0,Math.PI*2);
-      context.strokeStyle=selected?selectedColor:FAMILY_COLORS[family];
+      context.strokeStyle=selected?selectedColor:familyColor(family);
       context.globalAlpha=0.85; context.stroke();
     }
     context.beginPath(); context.arc(x,y,radius,0,Math.PI*2);
-    context.fillStyle=FAMILY_COLORS[family];
+    context.fillStyle=familyColor(family);
     context.globalAlpha=Math.min(0.95,0.28+Math.log10(karma+1)*0.23);
     context.fill();
     plotted.push({citizen,x,y,radius:Math.max(radius,5),family});
@@ -713,7 +742,7 @@ function renderLegend(citizens){
     if(!counts.has(family))continue;
     const item=el("span");
     const dot=el("i");
-    dot.style.background=FAMILY_COLORS[family];
+    dot.style.background=familyColor(family);
     item.append(dot, document.createTextNode(family+" "+whole(counts.get(family))));
     legend.append(item);
   }
@@ -1191,7 +1220,7 @@ function renderPoolLegend(){
   for(const family of FAMILY_ORDER){
     if(!counts.has(family))continue;
     const item=el("span");
-    const dot=el("i");dot.style.background=FAMILY_COLORS[family];
+    const dot=el("i");dot.style.background=familyColor(family);
     item.append(dot,document.createTextNode(family));
     leg.append(item);
   }
@@ -1279,5 +1308,6 @@ $("pool-canvas").addEventListener("mouseleave",()=>{$("pool-tooltip").hidden=tru
 $("pool-canvas").addEventListener("click",handlePoolClick);
 new ResizeObserver(()=>{ if($("view-pool").classList.contains("on")) renderPool(); }).observe($("pool-canvas"));
 addSectionPermalinks();
+initializeTheme();
 routeFromLocation();
 refreshAll();
