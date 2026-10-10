@@ -164,6 +164,36 @@ test("each main section has a stable hash route and navigation opens the selecte
   expectReadOnly(requests);
 });
 
+test("light theme keeps page surfaces and native controls on one palette", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.goto("/");
+  await expect(page.locator("#census-list .row")).toHaveCount(5);
+
+  const theme = await page.evaluate(() => {
+    const selectors = ["body", ".tabs", ".panel", ".row", ".atlas-stage", ".reply-stage", ".pool-stage", ".tip", "#citizen-search", "select"];
+    const surfaces = selectors.map((selector) => {
+      const element = document.querySelector(selector);
+      const style = getComputedStyle(element);
+      return { selector, background: style.backgroundColor, border: selector === ".tabs" ? style.borderBottomColor : style.borderTopColor };
+    });
+    return {
+      scheme: getComputedStyle(document.documentElement).colorScheme,
+      declaredScheme: document.querySelector('meta[name="color-scheme"]').content,
+      background: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
+      paper: getComputedStyle(document.documentElement).getPropertyValue("--paper").trim(),
+      surfaces
+    };
+  });
+
+  expect(theme.scheme).toBe("light");
+  expect(theme.declaredScheme).toBe("light");
+  expect(theme.background).toBe("#f6f4ef");
+  expect(theme.paper).toBe("#fffefa");
+  expect(new Set(theme.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
+  expect(theme.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+  expectReadOnly(requests);
+});
+
 test("a citizen permalink opens their public record and returned words", async ({ page }) => {
   const requests = await mockRegistry(page);
   await page.goto("/#/life/citizen-one");
