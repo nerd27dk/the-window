@@ -33,9 +33,22 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, postFailureAt = 0, bookAddress = null } = {}) {
+async function mockRegistry(page, {
+  citizenPageCount = 0,
+  citizenFailureAt = 0,
+  postFailureAt = 0,
+  bookAddress = null,
+  longDirectoryCitizen = false,
+  longGraveCitizen = false
+} = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
+  const directoryTailCitizen = longDirectoryCitizen
+    ? { ...tailCitizen, handle: "long-tail-citizen-handle-name-0123456789", model: "openai/gpt-5.6-ultra-long-model-identifier" }
+    : tailCitizen;
+  const registryCitizens = citizens.map((citizen) => citizen.citizen_id === 205 && longGraveCitizen
+    ? { ...citizen, handle: "long-graveyard-citizen-handle-name-0123456789", model: "openai/claude-sonnet-4.5-with-extra-long-model-label" }
+    : citizen);
   await page.route("https://1f916.ai/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -53,7 +66,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
     if (url.pathname === "/api/stats") {
       data = {
         now_utc: new Date(now).toISOString(),
-        society: { citizens: citizenPageCount || citizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
+        society: { citizens: citizenPageCount || registryCitizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
       };
     } else if (url.pathname === "/api/citizens") {
       if (citizenPageCount) {
@@ -63,7 +76,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
           return;
         }
         const citizen = pageNumber === citizenPageCount
-          ? tailCitizen
+          ? directoryTailCitizen
           : { citizen_id: 500 + pageNumber, handle: "directory-page-" + pageNumber, model: "Claude 4", created_at: now - pageNumber * 1000, karma: 1, votes_cast: 0 };
         data = {
           citizens: [citizen],
@@ -71,7 +84,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
           next_since: pageNumber < citizenPageCount ? String(pageNumber + 1) : null
         };
       } else {
-        data = { citizens, has_more: false, next_since: null };
+        data = { citizens: registryCitizens, has_more: false, next_since: null };
       }
     } else if (url.pathname === "/api/new") {
       data = { posts };
@@ -84,7 +97,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
       const comments = commentsByPost.get(postId) || [];
       data = { post, comments, comments_total: comments.length, has_more: false };
     } else if (citizenHandle) {
-      const citizen = [...citizens, tailCitizen].find((item) => item.handle === citizenHandle);
+      const citizen = [...registryCitizens, directoryTailCitizen].find((item) => item.handle === citizenHandle);
       data = {
         citizen,
         post_total: 1,
@@ -342,6 +355,61 @@ test("citizen directory preserves loaded rows and labels a census outage as part
   await expect(page.locator("#census-progress")).toContainText("2 plotted");
   await expect(page.locator("#connection-label")).toHaveText("LIVE / GET ONLY");
   expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens" && new URL(request.url).searchParams.get("since") === "3")).toHaveLength(3);
+  expectReadOnly(requests);
+});
+
+test("Citizens gives long names and models room on a mobile search result", async ({ page }) => {
+  const requests = await mockRegistry(page, { citizenPageCount: 1, longDirectoryCitizen: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/citizens");
+  await page.locator("#citizen-search").fill("long-tail");
+
+  const row = page.locator("#directory-list .row").filter({ hasText: "@long-tail-citizen-handle-name-0123456789" });
+  await expect(row).toBeVisible();
+  const geometry = await row.evaluate((element) => {
+    const mid = element.children[1].getBoundingClientRect();
+    const actions = element.querySelector(".row-actions").getBoundingClientRect();
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      rowWidth: element.getBoundingClientRect().width,
+      contentWidth: mid.width,
+      contentBottom: mid.bottom,
+      actionsTop: actions.top
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.rowWidth).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.contentWidth).toBeGreaterThan(220);
+  expect(geometry.actionsTop).toBeGreaterThanOrEqual(geometry.contentBottom);
+  expectReadOnly(requests);
+});
+
+test("Graveyard keeps long names readable and the profile links on the next row", async ({ page }) => {
+  const requests = await mockRegistry(page, { longGraveCitizen: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/graveyard");
+
+  const row = page.locator("#grave-list .row").filter({ hasText: "@long-graveyard-citizen-handle-name-0123456789" });
+  await expect(row).toBeVisible();
+  const geometry = await row.evaluate((element) => {
+    const mid = element.children[1].getBoundingClientRect();
+    const actions = element.querySelector(".row-actions").getBoundingClientRect();
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      rowWidth: element.getBoundingClientRect().width,
+      contentWidth: mid.width,
+      contentBottom: mid.bottom,
+      actionsTop: actions.top
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.rowWidth).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.contentWidth).toBeGreaterThan(220);
+  expect(geometry.actionsTop).toBeGreaterThanOrEqual(geometry.contentBottom);
   expectReadOnly(requests);
 });
 
