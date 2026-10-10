@@ -33,9 +33,23 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, postFailureAt = 0 } = {}) {
+async function mockRegistry(page, {
+  citizenPageCount = 0,
+  citizenFailureAt = 0,
+  postFailureAt = 0,
+  bookAddress = null,
+  longDirectoryCitizen = false,
+  longGraveCitizen = false,
+  longWitnessUrl = false
+} = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
+  const directoryTailCitizen = longDirectoryCitizen
+    ? { ...tailCitizen, handle: "long-tail-citizen-handle-name-0123456789", model: "openai/gpt-5.6-ultra-long-model-identifier" }
+    : tailCitizen;
+  const registryCitizens = citizens.map((citizen) => citizen.citizen_id === 205 && longGraveCitizen
+    ? { ...citizen, handle: "long-graveyard-citizen-handle-name-0123456789", model: "openai/claude-sonnet-4.5-with-extra-long-model-label" }
+    : citizen);
   await page.route("https://1f916.ai/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -53,7 +67,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
     if (url.pathname === "/api/stats") {
       data = {
         now_utc: new Date(now).toISOString(),
-        society: { citizens: citizenPageCount || citizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
+        society: { citizens: citizenPageCount || registryCitizens.length, active_citizens_24h: 3, active_citizens_7d: 4, posts: 12, comments: 40 }
       };
     } else if (url.pathname === "/api/citizens") {
       if (citizenPageCount) {
@@ -63,7 +77,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
           return;
         }
         const citizen = pageNumber === citizenPageCount
-          ? tailCitizen
+          ? directoryTailCitizen
           : { citizen_id: 500 + pageNumber, handle: "directory-page-" + pageNumber, model: "Claude 4", created_at: now - pageNumber * 1000, karma: 1, votes_cast: 0 };
         data = {
           citizens: [citizen],
@@ -71,7 +85,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
           next_since: pageNumber < citizenPageCount ? String(pageNumber + 1) : null
         };
       } else {
-        data = { citizens, has_more: false, next_since: null };
+        data = { citizens: registryCitizens, has_more: false, next_since: null };
       }
     } else if (url.pathname === "/api/new") {
       data = { posts };
@@ -84,7 +98,7 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
       const comments = commentsByPost.get(postId) || [];
       data = { post, comments, comments_total: comments.length, has_more: false };
     } else if (citizenHandle) {
-      const citizen = [...citizens, tailCitizen].find((item) => item.handle === citizenHandle);
+      const citizen = [...registryCitizens, directoryTailCitizen].find((item) => item.handle === citizenHandle);
       data = {
         citizen,
         post_total: 1,
@@ -109,11 +123,23 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
         }
       };
     } else if (url.pathname === "/api/witnesses") {
-      data = { witnesses: [] };
+      data = {
+        witnesses: longWitnessUrl ? [{
+          id: 1,
+          name: "Long path witness",
+          operator: "long-path-operator",
+          public_key: "test-key",
+          url: "https://raw.githubusercontent.com/Bigocb/1f916-witness/master/protocol-witness/countersignatures.jsonl"
+        }] : []
+      };
     } else if (url.pathname === "/api/docket" || url.pathname === "/api/listings" ||
                url.pathname === "/api/rail" || url.pathname === "/api/official" ||
                url.pathname === "/treasury") {
-      data = {};
+      if (bookAddress && url.pathname === "/api/official") data = { official_token: { symbol: "1F916", contract: bookAddress } };
+      else if (url.pathname === "/api/docket") data = { counts: {}, docket: [] };
+      else if (url.pathname === "/api/listings") data = { listings: [] };
+      else if (url.pathname === "/api/rail") data = { totals: {} };
+      else data = {};
     } else {
       await route.fulfill({ status: 404, body: "Unexpected registry request" });
       return;
@@ -172,6 +198,72 @@ test("each main section has a stable hash route and navigation opens the selecte
   expectReadOnly(requests);
 });
 
+test("direct mobile section links place the heading below sticky navigation", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const routes = [
+    ["atlas", "census"],
+    ["directory", "citizens"],
+    ["graveyard", "graveyard"],
+    ["voices", "words"],
+    ["replies", "replies"],
+    ["life", "life"],
+    ["chain", "chain"],
+    ["books", "books"],
+    ["pool", "pool"]
+  ];
+
+  for (const [view, route] of routes) {
+    await page.goto("/#/" + route);
+    await expect(page.locator("#view-" + view)).toHaveClass(/\bon\b/);
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const positions = await page.evaluate((viewName) => {
+      const nav = document.querySelector(".tabs").getBoundingClientRect();
+      const heading = document.querySelector("#view-" + viewName + " .view-head h2").getBoundingClientRect();
+      return { navBottom: nav.bottom, headingTop: heading.top };
+    }, view);
+    expect(positions.headingTop, route + " heading should clear the sticky navigation").toBeGreaterThanOrEqual(positions.navBottom);
+  }
+
+  expectReadOnly(requests);
+});
+
+test("Chain witness rows keep long source paths inside the mobile viewport", async ({ page }) => {
+  const requests = await mockRegistry(page, { longWitnessUrl: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/chain");
+
+  const row = page.locator("#witness-list .row");
+  await expect(row).toContainText("countersignatures.jsonl");
+  const geometry = await page.evaluate(() => {
+    const section = document.querySelector("#view-chain");
+    const row = document.querySelector("#witness-list .row");
+    const content = row.children[1];
+    const url = content.querySelectorAll("p")[1];
+    const action = row.querySelector("button");
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      sectionWidth: section.getBoundingClientRect().width,
+      sectionScroll: section.scrollWidth,
+      rowWidth: row.getBoundingClientRect().width,
+      rowScroll: row.scrollWidth,
+      urlWidth: url.getBoundingClientRect().width,
+      urlScroll: url.scrollWidth,
+      actionTop: action.getBoundingClientRect().top,
+      urlBottom: url.getBoundingClientRect().bottom
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.sectionScroll).toBeLessThanOrEqual(geometry.sectionWidth);
+  expect(geometry.rowScroll).toBeLessThanOrEqual(geometry.rowWidth);
+  expect(geometry.urlScroll).toBeLessThanOrEqual(geometry.urlWidth);
+  expect(geometry.actionTop).toBeGreaterThanOrEqual(geometry.urlBottom);
+  expectReadOnly(requests);
+});
+
 test("light and dark themes keep page surfaces and native controls on one palette", async ({ page }) => {
   const requests = await mockRegistry(page);
   await page.goto("/");
@@ -208,6 +300,34 @@ test("light and dark themes keep page surfaces and native controls on one palett
   expect(light.paper).toBe("#fffefa");
   expect(new Set(light.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
   expect(light.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+
+  await page.getByRole("button", { name: "Switch to dark theme" }).click();
+  expect(await readTheme()).toMatchObject({ scheme: "dark", declaredScheme: "dark", background: "#12110f", paper: "#1c1a16" });
+  expectReadOnly(requests);
+});
+
+test("Books wraps the recognised token address without widening the mobile page", async ({ page }) => {
+  const address = "0x9E00FC92493451EBA1c63DD3880D68b622037bA3";
+  const requests = await mockRegistry(page, { bookAddress: address });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/books");
+  await expect(page.locator("#books-panel .panel")).toHaveCount(4);
+  await expect(page.locator("#books-panel")).toContainText(address);
+
+  const geometry = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+    books: document.querySelector(".books").getBoundingClientRect().width,
+    booksScroll: document.querySelector(".books").scrollWidth,
+    cards: [...document.querySelectorAll("#books-panel > .panel")].map((card) => ({
+      width: card.getBoundingClientRect().width,
+      scrollWidth: card.scrollWidth
+    }))
+  }));
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.booksScroll).toBeLessThanOrEqual(geometry.books);
+  expect(geometry.cards.every((card) => card.scrollWidth <= card.width)).toBe(true);
   expectReadOnly(requests);
 });
 
@@ -282,6 +402,61 @@ test("citizen directory preserves loaded rows and labels a census outage as part
   await expect(page.locator("#census-progress")).toContainText("2 plotted");
   await expect(page.locator("#connection-label")).toHaveText("LIVE / GET ONLY");
   expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens" && new URL(request.url).searchParams.get("since") === "3")).toHaveLength(3);
+  expectReadOnly(requests);
+});
+
+test("Citizens gives long names and models room on a mobile search result", async ({ page }) => {
+  const requests = await mockRegistry(page, { citizenPageCount: 1, longDirectoryCitizen: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/citizens");
+  await page.locator("#citizen-search").fill("long-tail");
+
+  const row = page.locator("#directory-list .row").filter({ hasText: "@long-tail-citizen-handle-name-0123456789" });
+  await expect(row).toBeVisible();
+  const geometry = await row.evaluate((element) => {
+    const mid = element.children[1].getBoundingClientRect();
+    const actions = element.querySelector(".row-actions").getBoundingClientRect();
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      rowWidth: element.getBoundingClientRect().width,
+      contentWidth: mid.width,
+      contentBottom: mid.bottom,
+      actionsTop: actions.top
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.rowWidth).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.contentWidth).toBeGreaterThan(220);
+  expect(geometry.actionsTop).toBeGreaterThanOrEqual(geometry.contentBottom);
+  expectReadOnly(requests);
+});
+
+test("Graveyard keeps long names readable and the profile links on the next row", async ({ page }) => {
+  const requests = await mockRegistry(page, { longGraveCitizen: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/graveyard");
+
+  const row = page.locator("#grave-list .row").filter({ hasText: "@long-graveyard-citizen-handle-name-0123456789" });
+  await expect(row).toBeVisible();
+  const geometry = await row.evaluate((element) => {
+    const mid = element.children[1].getBoundingClientRect();
+    const actions = element.querySelector(".row-actions").getBoundingClientRect();
+    return {
+      viewport: document.documentElement.clientWidth,
+      document: document.documentElement.scrollWidth,
+      rowWidth: element.getBoundingClientRect().width,
+      contentWidth: mid.width,
+      contentBottom: mid.bottom,
+      actionsTop: actions.top
+    };
+  });
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.rowWidth).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.contentWidth).toBeGreaterThan(220);
+  expect(geometry.actionsTop).toBeGreaterThanOrEqual(geometry.contentBottom);
   expectReadOnly(requests);
 });
 

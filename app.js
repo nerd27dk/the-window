@@ -191,6 +191,15 @@ function navigateTo(route){
   if(window.location.hash===hash)routeFromLocation();
   else window.location.hash=hash;
 }
+function scrollViewBelowTabs(viewName){
+  window.requestAnimationFrame(()=>{
+    const view=$("view-"+viewName);
+    const tabs=document.querySelector(".tabs");
+    if(!view||!tabs)return;
+    const top=window.scrollY+view.getBoundingClientRect().top-tabs.getBoundingClientRect().height;
+    window.scrollTo(0,Math.max(0,top));
+  });
+}
 function routeFromLocation(){
   const route=parseLocationRoute();
   if(!route)return;
@@ -216,7 +225,7 @@ function routeFromLocation(){
     $("thread-panel").replaceChildren(el("p","empty","No thread open."));
   }
   if(!route.commentId&&window.location.hash.startsWith("#/")){
-    window.requestAnimationFrame(()=>$("view-"+route.view)?.scrollIntoView({block:"start"}));
+    scrollViewBelowTabs(route.view);
   }
 }
 function dollars(cents){
