@@ -126,7 +126,8 @@ canvas { width: 100%; height: 100%; display: block; }
 .chain-grid, .proof-grid, .books { display: grid; gap: 12px; }
 .chain-grid { grid-template-columns: repeat(3, 1fr); }
 .proof-grid { grid-template-columns: repeat(3, 1fr); }
-.books { grid-template-columns: 1fr; }
+.books { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.books > .panel { min-width: 0; overflow-wrap: anywhere; }
 .panel strong { display: block; font-size: 28px; margin: 6px 0; }
 .panel code { display: block; font-size: 12px; color: var(--mute); word-break: break-all; }
 .comment { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }

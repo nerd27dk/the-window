@@ -33,7 +33,7 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
     : []
 ]));
 
-async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, postFailureAt = 0 } = {}) {
+async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, postFailureAt = 0, bookAddress = null } = {}) {
   const requests = [];
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
   await page.route("https://1f916.ai/**", async (route) => {
@@ -113,7 +113,11 @@ async function mockRegistry(page, { citizenPageCount = 0, citizenFailureAt = 0, 
     } else if (url.pathname === "/api/docket" || url.pathname === "/api/listings" ||
                url.pathname === "/api/rail" || url.pathname === "/api/official" ||
                url.pathname === "/treasury") {
-      data = {};
+      if (bookAddress && url.pathname === "/api/official") data = { official_token: { symbol: "1F916", contract: bookAddress } };
+      else if (url.pathname === "/api/docket") data = { counts: {}, docket: [] };
+      else if (url.pathname === "/api/listings") data = { listings: [] };
+      else if (url.pathname === "/api/rail") data = { totals: {} };
+      else data = {};
     } else {
       await route.fulfill({ status: 404, body: "Unexpected registry request" });
       return;
@@ -239,6 +243,31 @@ test("light and dark themes keep page surfaces and native controls on one palett
   expect(light.paper).toBe("#fffefa");
   expect(new Set(light.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
   expect(light.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+  expectReadOnly(requests);
+});
+
+test("Books wraps the recognised token address without widening the mobile page", async ({ page }) => {
+  const address = "0x9E00FC92493451EBA1c63DD3880D68b622037bA3";
+  const requests = await mockRegistry(page, { bookAddress: address });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/books");
+  await expect(page.locator("#books-panel .panel")).toHaveCount(4);
+  await expect(page.locator("#books-panel")).toContainText(address);
+
+  const geometry = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+    books: document.querySelector(".books").getBoundingClientRect().width,
+    booksScroll: document.querySelector(".books").scrollWidth,
+    cards: [...document.querySelectorAll("#books-panel > .panel")].map((card) => ({
+      width: card.getBoundingClientRect().width,
+      scrollWidth: card.scrollWidth
+    }))
+  }));
+
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
+  expect(geometry.booksScroll).toBeLessThanOrEqual(geometry.books);
+  expect(geometry.cards.every((card) => card.scrollWidth <= card.width)).toBe(true);
   expectReadOnly(requests);
 });
 
