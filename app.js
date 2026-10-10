@@ -11,7 +11,7 @@ const state={
   listingDetails:new Map(),treasury:null,rail:null,official:null,
   selectedFamily:"all",plotted:[],requestLog:[],selectedHandle:null,
   censusComplete:false,censusPages:0,censusPromise:null,censusError:null,
-  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,replyHover:null,
+  byHandle:new Map(),replyEdges:[],replyNodes:[],replyLoaded:false,replyBusy:false,replyHover:null,replyThreadsRead:0,replyThreadsFailed:0,
   poolCells:[],poolPoints:[],poolLoaded:false,poolAnima:null,poolFrame:0,
   threadRequest:0,lifeRequest:0
 };
@@ -298,11 +298,17 @@ async function loadReplies(){
   $("reply-meta").textContent="Reading "+state.posts.length+" threads...";
   const byId=new Map();
   const pairMap=new Map();
+  let threadsRead=0,threadsFailed=0;
   try{
     for(let i=0;i<state.posts.length;i+=1){
       const post=state.posts[i];
       $("reply-meta").textContent="Reading thread "+(i+1)+" / "+state.posts.length+" (#"+post.id+")";
-      const data=await safeGet("/api/post/"+encodeURIComponent(post.id));
+      let data;
+      try{data=await safeGetRetry("/api/post/"+encodeURIComponent(post.id))}catch(error){
+        threadsFailed+=1;
+        continue;
+      }
+      threadsRead+=1;
       const threadPost=data.post||post;
       const comments=data.comments||[];
       const commentById=new Map(comments.map((item)=>[item.id,item]));
@@ -327,6 +333,8 @@ async function loadReplies(){
       }
     }
     state.replyEdges=[...pairMap.values()].sort((a,b)=>b.count-a.count);
+    state.replyThreadsRead=threadsRead;
+    state.replyThreadsFailed=threadsFailed;
     state.replyNodes=[...byId.values()].map((node)=>{
       const citizen=state.byHandle.get(node.handle);
       node.family=modelFamily(citizen&&citizen.model);
@@ -334,7 +342,11 @@ async function loadReplies(){
       return node;
     });
     state.replyLoaded=true;
-    $("reply-meta").textContent=whole(state.replyEdges.length)+" directed pairs from "+whole(state.posts.length)+" newest unpinned threads. Not seven days. Not the whole square.";
+    const scope=threadsRead===state.posts.length
+      ?whole(state.posts.length)+" newest unpinned threads"
+      :whole(threadsRead)+" of "+whole(state.posts.length)+" newest unpinned threads";
+    const missed=threadsFailed?" "+whole(threadsFailed)+(threadsFailed===1?" thread could not":" threads could not")+" be read after retries.":"";
+    $("reply-meta").textContent=whole(state.replyEdges.length)+" directed pairs from "+scope+"."+missed+" Not seven days. Not the whole square.";
     renderReplyGraph();
     renderReplyList();
   }catch(error){
@@ -360,7 +372,12 @@ function renderReplyGraph(){
   const canvas=$("reply-canvas");
   if(!canvas)return;
   const rect=canvas.getBoundingClientRect();
-  if(!state.replyNodes.length||rect.width<1||rect.height<1){state.replyPlotted=[];return}
+  if(!state.replyNodes.length||rect.width<1||rect.height<1){
+    state.replyPlotted=[];
+    const summary=$("reply-network-summary");
+    if(summary&&state.replyThreadsFailed)summary.textContent="No graph shown; "+whole(state.replyThreadsFailed)+" thread"+(state.replyThreadsFailed===1?" could":"s could")+" not be read after retries.";
+    return;
+  }
   const ratio=Math.min(window.devicePixelRatio||1,2);
   canvas.width=Math.max(1,Math.floor(rect.width*ratio));
   canvas.height=Math.max(1,Math.floor(rect.height*ratio));
@@ -405,7 +422,7 @@ function renderReplyGraph(){
     const endUnitX=endDX/endLength, endUnitY=endDY/endLength;
     const endX=b.x-endUnitX*(b.r+3), endY=b.y-endUnitY*(b.r+3);
     const active=!hovered||edge.from===hovered||edge.to===hovered;
-    context.globalAlpha=hovered?(active?0.82:0.035):0.18;
+    context.globalAlpha=hovered?(active?0.86:0.035):0.30;
     context.strokeStyle=FAMILY_COLORS[a.node.family]||FAMILY_COLORS.other;
     context.fillStyle=context.strokeStyle;
     context.lineWidth=active?Math.min(3.5,1+Math.log2(edge.threads+1)*0.75):0.8;
@@ -439,7 +456,10 @@ function renderReplyGraph(){
   canvas.dataset.relationshipCount=String(relationships.length);
   canvas.setAttribute("aria-label",placed.length+" participants and "+relationships.length+" directed relationships. Hover a dot for its name; click to open its profile.");
   const summary=$("reply-network-summary");
-  if(summary)summary.textContent=whole(placed.length)+" participants · "+whole(relationships.length)+" directed relationships · "+whole(state.replyEdges.length)+" thread pairs across "+whole(state.posts.length)+" threads";
+  const threadScope=state.replyThreadsRead===state.posts.length
+    ?whole(state.posts.length)+" threads"
+    :whole(state.replyThreadsRead)+" of "+whole(state.posts.length)+" threads";
+  if(summary)summary.textContent=whole(placed.length)+" participants · "+whole(relationships.length)+" directed relationships · "+whole(state.replyEdges.length)+" thread pairs across "+threadScope;
   const legend=$("reply-legend");
   if(legend){
     legend.replaceChildren();
@@ -460,7 +480,9 @@ function renderReplyList(){
   if(!list)return;
   list.replaceChildren();
   if(!state.replyEdges.length){
-    list.append(el("p","empty","No reply pairs in these threads."));
+    list.append(el("p","empty",state.replyThreadsFailed
+      ?"No reply pairs were returned; "+whole(state.replyThreadsFailed)+" thread"+(state.replyThreadsFailed===1?" could":"s could")+" not be read after retries."
+      :"No reply pairs in these threads."));
     return;
   }
   state.replyEdges.forEach((edge)=>{
@@ -1217,7 +1239,7 @@ $("random-citizen").addEventListener("click",()=>{
 $("refresh-data").addEventListener("click",()=>{
   state.docket=null; state.listingDetails=new Map();
   state.censusPromise=null; state.censusComplete=false; state.censusError=null;
-  state.replyLoaded=false; state.replyEdges=[]; state.replyNodes=[];
+  state.replyLoaded=false; state.replyEdges=[]; state.replyNodes=[]; state.replyThreadsRead=0; state.replyThreadsFailed=0;
   refreshAll();
 });
 $("reply-canvas").addEventListener("mousemove",(event)=>{
