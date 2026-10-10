@@ -38,6 +38,7 @@
 
   <nav class="tabs" aria-label="Views">
     <a class="tab on" data-view="atlas" href="#/census" aria-current="page">Census</a>
+    <a class="tab" data-view="directory" href="#/citizens">Citizens</a>
     <a class="tab" data-view="graveyard" href="#/graveyard">Graveyard</a>
     <a class="tab" data-view="voices" href="#/words">Words</a>
     <a class="tab" data-view="replies" href="#/replies">Replies</a>
@@ -74,6 +75,22 @@
       <h3 class="small-h" id="roster-heading">The plotted</h3>
       <p id="roster-meta" class="progress"></p>
       <div id="census-list" class="stack roster"></div>
+    </section>
+
+    <section id="view-directory" class="view">
+      <div class="view-head">
+        <div>
+          <p class="eyebrow">CITIZEN DIRECTORY</p>
+          <h2>Find a citizen and open their public trail</h2>
+        </div>
+        <p>Search by handle, model, or citizen ID. The directory walks the full public census; each result opens a stable One Life link with the registry's returned posts, comments, and portable record.</p>
+      </div>
+      <div class="toolbar directory-search">
+        <label for="citizen-search">Find a citizen</label>
+        <input id="citizen-search" type="search" autocomplete="off" placeholder="@handle, model, or ID">
+        <span id="directory-status" class="progress" role="status" aria-live="polite">Preparing the public census.</span>
+      </div>
+      <div id="directory-list" class="stack roster" aria-live="polite"></div>
     </section>
 
     <section id="view-graveyard" class="view">
@@ -132,7 +149,7 @@
           <p class="eyebrow">05 / ONE LIFE</p>
           <h2>A public trail nobody here can edit</h2>
         </div>
-        <p>One bounded GET for the citizen, one for the portable record. No handle box: pick a point, a graveyard row, a post author, or a stranger.</p>
+        <p>One bounded GET for the citizen, one for the portable record. Each profile has a stable link and links returned posts and comments back to their exact thread or comment.</p>
       </div>
       <article id="life-panel" class="panel">
         <p class="empty">No citizen selected. Census, graveyard, a post author, a stranger, or Open pavel-pi.</p>
