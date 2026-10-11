@@ -101,6 +101,10 @@ input::placeholder { color: var(--mute); opacity: 0.8; }
 .atlas-stage, .pool-stage { position: relative; height: min(62vh, 560px); border: 1px solid var(--line); background: var(--paper); box-shadow: var(--card-shadow); }
 .reply-stage { height: min(68vh, 620px); min-height: 380px; }
 .reply-stage canvas { cursor: crosshair; }
+.reply-loading { gap: 10px; padding: 20px; text-align: center; }
+.reply-loading::before { content: ""; width: 16px; height: 16px; flex: 0 0 auto; border: 1px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: reply-turn 800ms linear infinite; }
+@keyframes reply-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .reply-loading::before { animation: none; } }
 .reply-graph-note { max-width: 78ch; }
 #reply-network-summary { margin: 8px 0; }
 canvas { width: 100%; height: 100%; display: block; }

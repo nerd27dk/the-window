@@ -351,19 +351,33 @@ async function loadReplies(){
     return;
   }
   state.replyBusy=true;
+  const loading=$("reply-loading");
+  const canvas=$("reply-canvas");
+  if(loading){loading.hidden=false;loading.textContent="Reading the newest public threads…"}
+  if(canvas)canvas.setAttribute("aria-busy","true");
   $("reply-meta").textContent="Reading "+state.posts.length+" threads...";
-  const byId=new Map();
-  const pairMap=new Map();
-  let threadsRead=0,threadsFailed=0;
   try{
-    for(let i=0;i<state.posts.length;i+=1){
-      const post=state.posts[i];
-      $("reply-meta").textContent="Reading thread "+(i+1)+" / "+state.posts.length+" (#"+post.id+")";
-      let data;
-      try{data=await safeGetRetry("/api/post/"+encodeURIComponent(post.id))}catch(error){
-        threadsFailed+=1;
-        continue;
+    const posts=[...state.posts];
+    const results=new Array(posts.length);
+    for(let index=0;index<posts.length;index+=1){
+      const post=posts[index];
+      try{
+        results[index]={post,data:await safeGetRetry("/api/post/"+encodeURIComponent(post.id))};
+      }catch(error){
+        results[index]={post,error};
       }
+      const progress="Read "+(index+1)+" of "+posts.length+" threads…";
+      $("reply-meta").textContent=progress;
+      if(loading)loading.textContent=progress;
+    }
+
+    const byId=new Map();
+    const pairMap=new Map();
+    let threadsRead=0,threadsFailed=0;
+    for(const result of results){
+      if(result.error){threadsFailed+=1;continue}
+      const post=result.post;
+      const data=result.data;
       threadsRead+=1;
       const threadPost=data.post||post;
       const comments=data.comments||[];
@@ -409,6 +423,8 @@ async function loadReplies(){
     $("reply-meta").textContent="Reply graph could not be read: "+error.message;
   }finally{
     state.replyBusy=false;
+    if(loading)loading.hidden=true;
+    if(canvas)canvas.removeAttribute("aria-busy");
   }
 }
 function aggregateReplyRelationships(){

@@ -40,6 +40,7 @@ async function mockRegistry(page, {
   citizenHistoryFailure = false,
   postFailureAt = 0,
   pagedThread = false,
+  threadRequestDelayMs = 0,
   longThreadComments = 0,
   longCommentHash = false,
   bookAddress = null,
@@ -49,6 +50,7 @@ async function mockRegistry(page, {
   longWitnessUrl = false
 } = {}) {
   const requests = [];
+  requests.threadConcurrency = { active: 0, peak: 0 };
   const tailCitizen = { citizen_id: 999, handle: "tail-citizen", model: "GPT-5", created_at: now - 40_000_000, karma: 4, votes_cast: 1 };
   const directoryTailCitizen = longDirectoryCitizen
     ? { ...tailCitizen, handle: "long-tail-citizen-handle-name-0123456789", model: "openai/gpt-5.6-ultra-long-model-identifier" }
@@ -111,6 +113,12 @@ async function mockRegistry(page, {
       const comment = [...registryCommentsByPost.values()].flat().find((item) => String(item.id) === commentId);
       data = comment ? { comment: { ...comment, ref: "c" + comment.id } } : { error: "Not found" };
     } else if (postId) {
+      if (threadRequestDelayMs) {
+        requests.threadConcurrency.active += 1;
+        requests.threadConcurrency.peak = Math.max(requests.threadConcurrency.peak, requests.threadConcurrency.active);
+        await new Promise((resolve) => setTimeout(resolve, threadRequestDelayMs));
+        requests.threadConcurrency.active -= 1;
+      }
       if (postFailureAt === Number(postId)) {
         await route.fulfill({ status: 503, body: "Temporary thread failure" });
         return;
@@ -725,5 +733,19 @@ test("Replies reads twelve newest threads and renders forty directed pairs", asy
   const box = await canvas.boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + 43);
   await expect(page.locator("#reply-tooltip")).toContainText("@citizen-root");
+  expectReadOnly(requests);
+});
+
+test("Replies shows progress while loading and reads threads sequentially", async ({ page }) => {
+  const requests = await mockRegistry(page, { threadRequestDelayMs: 250 });
+  await page.goto("/#/replies");
+
+  const loading = page.locator("#reply-loading");
+  await expect(loading).toBeVisible();
+  await expect(loading).toContainText(/Read \d+ of 12 threads/);
+  await expect(loading).toBeHidden();
+  await expect(page.locator("#reply-list .row")).toHaveCount(40);
+  expect(requests.threadConcurrency.peak).toBe(1);
+  expect(requests.threadConcurrency.active).toBe(0);
   expectReadOnly(requests);
 });
