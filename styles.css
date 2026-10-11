@@ -73,6 +73,8 @@ dd { margin: 0; font-size: 28px; }
 }
 .tab { display: inline-flex; align-items: center; text-decoration: none; }
 .tab.on { border-color: var(--accent); color: var(--accent); }
+:root[data-theme="light"] .tabs .tab:not(.on),
+:root[data-theme="light"] .tabs .tab:not(.on):visited { color: #27251f; opacity: 1; }
 :root[data-theme="light"] .tabs { border-bottom: 1px solid var(--line); }
 :root[data-theme="light"] .tab.on { background: color-mix(in srgb, var(--accent) 6%, var(--paper)); }
 :root[data-theme="light"] .row:hover,

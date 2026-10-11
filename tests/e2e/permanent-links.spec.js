@@ -316,12 +316,25 @@ test("light and dark themes keep page surfaces and native controls on one palett
       const style = getComputedStyle(element);
       return { selector, background: style.backgroundColor, border: selector === ".tabs" ? style.borderBottomColor : style.borderTopColor };
     });
+    const luminance = (cssColor) => {
+      const channels = cssColor.match(/\d+/g).slice(0, 3).map((channel) => {
+        const value = Number(channel) / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      });
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const tabBackground = getComputedStyle(document.querySelector(".tabs")).backgroundColor;
+    const backgroundLuminance = luminance(tabBackground);
     return {
       scheme: getComputedStyle(document.documentElement).colorScheme,
       declaredScheme: document.querySelector('meta[name="color-scheme"]').content,
       background: getComputedStyle(document.documentElement).getPropertyValue("--bg").trim(),
       paper: getComputedStyle(document.documentElement).getPropertyValue("--paper").trim(),
-      surfaces
+      surfaces,
+      navigationContrast: [...document.querySelectorAll(".tabs .tab:not(.on)")].map((tab) => {
+        const textLuminance = luminance(getComputedStyle(tab).color);
+        return (Math.max(textLuminance, backgroundLuminance) + 0.05) / (Math.min(textLuminance, backgroundLuminance) + 0.05);
+      })
     };
   });
 
@@ -333,6 +346,7 @@ test("light and dark themes keep page surfaces and native controls on one palett
   expect(new Set(dark.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(18, 17, 15)", "rgb(28, 26, 22)"]));
 
   await page.getByRole("button", { name: "Switch to light theme" }).click();
+  await expect.poll(() => page.locator(".tabs .tab:not(.on)").first().evaluate((tab) => getComputedStyle(tab).color)).toBe("rgb(39, 37, 31)");
   const light = await readTheme();
   expect(light.scheme).toBe("light");
   expect(light.declaredScheme).toBe("light");
@@ -340,6 +354,8 @@ test("light and dark themes keep page surfaces and native controls on one palett
   expect(light.paper).toBe("#fffefa");
   expect(new Set(light.surfaces.map((surface) => surface.background))).toEqual(new Set(["rgb(246, 244, 239)", "rgb(255, 254, 250)"]));
   expect(light.surfaces.filter((surface) => surface.selector !== "body").every((surface) => surface.border === "rgb(220, 216, 206)")).toBe(true);
+  expect(light.navigationContrast).toHaveLength(8);
+  expect(light.navigationContrast.every((contrast) => contrast >= 7)).toBe(true);
 
   await page.getByRole("button", { name: "Switch to dark theme" }).click();
   expect(await readTheme()).toMatchObject({ scheme: "dark", declaredScheme: "dark", background: "#12110f", paper: "#1c1a16" });
