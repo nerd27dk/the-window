@@ -123,6 +123,7 @@ canvas { width: 100%; height: 100%; display: block; }
 .row.on { border-color: var(--accent); }
 .roster { max-height: min(48vh, 420px); overflow: auto; margin-top: 8px; padding-right: 4px; scrollbar-color: var(--line) var(--bg); }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.split > * { min-width: 0; }
 .small-h { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--mute); }
 .empty { color: var(--mute); margin: 0; }
 .chain-grid, .proof-grid, .books { display: grid; gap: 12px; }
@@ -133,6 +134,7 @@ canvas { width: 100%; height: 100%; display: block; }
 .panel strong { display: block; font-size: 28px; margin: 6px 0; }
 .panel code { display: block; font-size: 12px; color: var(--mute); word-break: break-all; }
 .comment { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+#thread-panel { min-width: 0; overflow-wrap: anywhere; }
 .life-activity-title { font-weight: 600; margin: 8px 0 4px; }
 .life-activity-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
 .comment-target { border-top-color: var(--accent); border-left: 2px solid var(--accent); padding-left: 8px; }

@@ -209,6 +209,14 @@ function scrollViewBelowTabs(viewName){
     window.scrollTo(0,Math.max(0,top));
   });
 }
+function scrollElementBelowTabs(target){
+  window.requestAnimationFrame(()=>window.requestAnimationFrame(()=>{
+    const tabs=document.querySelector(".tabs");
+    if(!target||!target.isConnected||!tabs)return;
+    const top=window.scrollY+target.getBoundingClientRect().top-tabs.getBoundingClientRect().height-12;
+    window.scrollTo(0,Math.max(0,top));
+  }));
+}
 function routeFromLocation(){
   const route=parseLocationRoute();
   if(!route)return;
@@ -234,7 +242,7 @@ function routeFromLocation(){
     state.threadRequest+=1;
     $("thread-panel").replaceChildren(el("p","empty","No thread open."));
   }
-  if(!route.commentId&&window.location.hash.startsWith("#/")){
+  if(window.location.hash.startsWith("#/")){
     scrollViewBelowTabs(route.view);
   }
 }
@@ -943,19 +951,19 @@ async function loadThread(id,commentId,requestId=null){
     });
     if(commentId){
       const target=document.getElementById("comment-"+commentId);
-      if(target)window.requestAnimationFrame(()=>target.scrollIntoView({block:"center"}));
+      if(target)scrollElementBelowTabs(target);
       else{
         const note=el("p","muted",pagingError
           ?"The exact comment may be in the part of the thread that did not load."
           :"Comment c"+commentId+" is not in this thread.");
         panel.append(note);
-        window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
+        scrollElementBelowTabs(panel);
       }
     }
   }catch(error){
     if(activeRequest!==state.threadRequest)return;
     panel.replaceChildren(el("p","empty","Thread could not be read: "+error.message));
-    if(commentId)window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
+    if(commentId)scrollElementBelowTabs(panel);
   }
 }
 

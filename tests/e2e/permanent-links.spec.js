@@ -40,6 +40,8 @@ async function mockRegistry(page, {
   citizenHistoryFailure = false,
   postFailureAt = 0,
   pagedThread = false,
+  longThreadComments = 0,
+  longCommentHash = false,
   bookAddress = null,
   longDirectoryCitizen = false,
   longGraveCitizen = false,
@@ -54,6 +56,17 @@ async function mockRegistry(page, {
   const registryCitizens = citizens.map((citizen) => citizen.citizen_id === 205 && longGraveCitizen
     ? { ...citizen, handle: "long-graveyard-citizen-handle-name-0123456789", model: "openai/claude-sonnet-4.5-with-extra-long-model-label" }
     : citizen);
+  const registryCommentsByPost = new Map(commentsByPost);
+  if (longThreadComments) {
+    registryCommentsByPost.set("300", Array.from({ length: longThreadComments }, (_, index) => ({
+      id: 1000 + index,
+      post_id: 300,
+      parent_id: null,
+      author: "citizen-" + ["one", "two", "three", "four"][index % 4],
+      body: longCommentHash && index === longThreadComments - 1 ? "Evidence: " + "a".repeat(64) : "Reply " + index + " in thread 300",
+      created_at: now - (longThreadComments - index) * 1000
+    })));
+  }
   await page.route("https://1f916.ai/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -95,7 +108,7 @@ async function mockRegistry(page, {
     } else if (url.pathname === "/api/new") {
       data = { posts };
     } else if (commentId) {
-      const comment = [...commentsByPost.values()].flat().find((item) => String(item.id) === commentId);
+      const comment = [...registryCommentsByPost.values()].flat().find((item) => String(item.id) === commentId);
       data = comment ? { comment: { ...comment, ref: "c" + comment.id } } : { error: "Not found" };
     } else if (postId) {
       if (postFailureAt === Number(postId)) {
@@ -103,7 +116,7 @@ async function mockRegistry(page, {
         return;
       }
       const post = posts.find((item) => String(item.id) === postId);
-      const comments = commentsByPost.get(postId) || [];
+      const comments = registryCommentsByPost.get(postId) || [];
       if (pagedThread && postId === "300" && !url.searchParams.has("since")) {
         data = { post, comments: comments.slice(0, 1), comments_total: comments.length, has_more: true, next_since: "1000:1000" };
       } else if (pagedThread && postId === "300" && url.searchParams.get("since") === "1000:1000") {
@@ -630,6 +643,27 @@ test("a canonical comment permalink resolves its thread and highlights the exact
   await expect(comment).toContainText("Reply 0 in thread 300");
   await expect(comment.locator("a.permalink")).toHaveAttribute("href", /#\/comment\/c1000$/);
   expect(requests.some((request) => new URL(request.url).pathname === "/api/comment/1000")).toBe(true);
+  expectReadOnly(requests);
+});
+
+test("mobile comment permalinks reveal the deep target below navigation without horizontal overflow", async ({ page }) => {
+  const requests = await mockRegistry(page, { longThreadComments: 40, longCommentHash: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/comment/c1039");
+
+  const comment = page.locator("#comment-1039");
+  await expect(comment).toHaveClass(/comment-target/);
+  await expect.poll(() => page.evaluate(() => {
+    const nav = document.querySelector(".tabs").getBoundingClientRect();
+    const target = document.querySelector("#comment-1039").getBoundingClientRect();
+    return target.top >= nav.bottom + 8 && target.top < window.innerHeight;
+  })).toBe(true);
+
+  const geometry = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth
+  }));
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport);
   expectReadOnly(requests);
 });
 
