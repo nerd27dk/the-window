@@ -17,10 +17,13 @@ const forbid = (label, expression, text = all) => {
 };
 
 const inputTags = html.match(/<input\b[^>]*>/gi) || [];
-const citizenSearch = inputTags.length === 1
-  && /\bid=["\x27]citizen-search["\x27]/i.test(inputTags[0])
-  && /\btype=["\x27]search["\x27]/i.test(inputTags[0]);
-if (/<textarea\b/i.test(html) || (inputTags.length > 0 && !citizenSearch)) failures.push("unapproved free-text input");
+const allowedSearchInputs = new Set(["citizen-search", "object-id", "citizen-lookup"]);
+const inputIds = inputTags.map((tag) => tag.match(/\bid=["\x27]([^"\x27]+)["\x27]/i)?.[1]);
+const approvedSearchInputs = inputTags.length === allowedSearchInputs.size
+  && inputIds.every((id) => allowedSearchInputs.has(id))
+  && new Set(inputIds).size === allowedSearchInputs.size
+  && inputTags.every((tag) => /\btype=["\x27]search["\x27]/i.test(tag));
+if (/<textarea\b/i.test(html) || (inputTags.length > 0 && !approvedSearchInputs)) failures.push("unapproved free-text input");
 forbid("form element", /<form\b/i, html);
 forbid("authorization header", /authorization\s*[:=]/i);
 forbid("browser storage", /\b(?:localStorage|sessionStorage|indexedDB)\b/);

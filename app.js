@@ -58,9 +58,10 @@ function permittedPath(url){
   if(path==="/api/stats"||path==="/api/checkpoint"||path==="/api/witnesses"||path==="/api/docket"||path==="/api/listings"||path==="/api/rail"||path==="/api/official"||path==="/treasury")return keys.length===0;
   if(path==="/api/citizens")return keys.every((key)=>key==="since");
   if(path==="/api/new")return keys.every((key)=>key==="limit");
-  if(/^\/api\/citizen\/[A-Za-z0-9_-]+$/.test(path))return keys.length===0;
+  if(/^\/api\/citizen\/[A-Za-z0-9_-]+$/.test(path))return keys.every((key)=>key==="posts_before"||key==="comments_before");
   if(/^\/api\/record\/[A-Za-z0-9_-]+$/.test(path))return keys.length===0;
-  if(/^\/api\/post\/\d+$/.test(path))return keys.length===0;
+  if(/^\/api\/post\/\d+$/.test(path))return keys.every((key)=>key==="since");
+  if(/^\/api\/comment\/\d+$/.test(path))return keys.length===0;
   if(/^\/api\/listings\/\d+$/.test(path))return keys.length===0;
   return false;
 }
@@ -120,10 +121,13 @@ function hashUnit(text){
 }
 const ROUTE_FOR_VIEW={atlas:"census",directory:"citizens",graveyard:"graveyard",voices:"words",replies:"replies",life:"life",chain:"chain",books:"books",pool:"pool"};
 const VIEW_FOR_ROUTE=Object.fromEntries(Object.entries(ROUTE_FOR_VIEW).map(([view,route])=>[route,view]));
-function routeForLife(handle){return"life/"+encodeURIComponent(handle)}
+function routeForLife(handle){return"citizen/"+encodeURIComponent(handle)}
+function routeForComment(commentId){
+  const value=String(commentId||"").replace(/^c/i,"");
+  return"comment/c"+encodeURIComponent(value);
+}
 function routeForPost(postId,commentId){
-  const route="words/post/"+encodeURIComponent(postId);
-  return commentId==null?route:route+"/comment/"+encodeURIComponent(commentId);
+  return commentId==null?"post/"+encodeURIComponent(postId):routeForComment(commentId);
 }
 function permalinkHref(route){
   const url=new URL(window.location.href);
@@ -170,18 +174,23 @@ function parseLocationRoute(){
   let parts;
   try{parts=path.split("/").filter(Boolean).map((part)=>decodeURIComponent(part))}catch(_error){return{view:"atlas"}}
   const route=parts[0]||"census";
+  if(route==="citizen"||route==="life"){
+    const handle=parts[1]||null;
+    return{view:"life",handle:handle&&/^[A-Za-z0-9_-]+$/.test(handle)?handle:null};
+  }
+  if(route==="post"&&/^\d+$/.test(parts[1]||""))return{view:"voices",postId:parts[1]};
+  if(route==="comment"&&/^(?:c)?\d+$/i.test(parts[1]||"")){
+    const commentId=String(parts[1]).replace(/^c/i,"");
+    return{view:"voices",commentId,commentRef:"c"+commentId};
+  }
   const view=VIEW_FOR_ROUTE[route];
   if(!view)return{view:"atlas"};
   if(route==="census"){
     const family=parts[1]==="family"?parts[2]||"all":query.get("family")||"all";
     return{view,family:FAMILY_ORDER.includes(family)?family:"all"};
   }
-  if(route==="life"){
-    const handle=parts[1]||null;
-    return{view,handle:handle&&/^[A-Za-z0-9_-]+$/.test(handle)?handle:null};
-  }
   if(route==="words"&&parts[1]==="post"&&/^\d+$/.test(parts[2]||"")){
-    const commentId=parts[3]==="comment"&&/^\d+$/.test(parts[4]||"")?parts[4]:null;
+    const commentId=parts[3]==="comment"&&/^(?:c)?\d+$/i.test(parts[4]||"")?String(parts[4]).replace(/^c/i,""):null;
     return{view,postId:parts[2],commentId};
   }
   return{view};
@@ -220,6 +229,7 @@ function routeFromLocation(){
     markRoster();
   }
   if(route.postId)loadThread(route.postId,route.commentId);
+  else if(route.commentId)loadCommentTarget(route.commentId,route.commentRef);
   else if(route.view==="voices"){
     state.threadRequest+=1;
     $("thread-panel").replaceChildren(el("p","empty","No thread open."));
@@ -825,14 +835,77 @@ function openThread(id,commentId){
   if(!/^\d+$/.test(String(id)))return;
   navigateTo(routeForPost(id,commentId));
 }
-async function loadThread(id,commentId){
+function objectRouteFromInput(rawValue){
+  let value=String(rawValue||"").trim();
+  if(!value)return null;
+  const hashAt=value.lastIndexOf("#/");
+  if(hashAt>=0)value=value.slice(hashAt+2);
+  value=value.replace(/\?.*$/,"").replace(/^#(?=[c\d])/i,"").replace(/^\/+/,"");
+  const legacy=value.match(/^words\/post\/(\d+)(?:\/comment\/(c?\d+))?$/i);
+  if(legacy)return legacy[2]?routeForComment(legacy[2]):routeForPost(legacy[1]);
+  const post=value.match(/^(?:post\/)?(\d+)$/i);
+  if(post)return routeForPost(post[1]);
+  const comment=value.match(/^(?:comment\/)?(c\d+)$/i);
+  if(comment)return routeForComment(comment[1]);
+  return null;
+}
+function submitObjectLookup(){
+  const route=objectRouteFromInput($("object-id").value);
+  if(!route){
+    $("object-id-status").textContent="Enter a post number or comment ID like c102709.";
+    return;
+  }
+  $("object-id-status").textContent="Opening permanent link…";
+  navigateTo(route);
+}
+function commentRouteId(comment){return comment.ref||("c"+String(comment.id||""));}
+async function loadCommentTarget(commentId,commentRef){
   const requestId=++state.threadRequest;
+  const panel=$("thread-panel");
+  panel.replaceChildren(el("p","empty","Finding comment "+(commentRef||("c"+commentId))+"..."));
+  try{
+    if(requestId!==state.threadRequest)return;
+    const data=await safeGet("/api/comment/"+encodeURIComponent(commentId));
+    if(requestId!==state.threadRequest)return;
+    const comment=data.comment||{};
+    if(!/^\d+$/.test(String(comment.post_id||"")))throw new Error("comment has no parent post");
+    await loadThread(comment.post_id,comment.id||commentId,requestId);
+  }catch(error){
+    if(requestId!==state.threadRequest)return;
+    panel.replaceChildren(el("p","empty","Comment could not be read: "+error.message));
+  }
+}
+async function loadThread(id,commentId,requestId=null){
+  const activeRequest=requestId==null?++state.threadRequest:requestId;
   const panel=$("thread-panel");
   panel.replaceChildren(el("p","empty","Reading post "+id+"..."));
   try{
-    const data=await safeGet("/api/post/"+encodeURIComponent(id));
-    if(requestId!==state.threadRequest)return;
+    let data=await safeGet("/api/post/"+encodeURIComponent(id));
+    if(activeRequest!==state.threadRequest)return;
     const post=data.post||{};
+    let commentsTotal=Number(data.comments_total||data.comments?.length||0);
+    const commentsById=new Map();
+    (data.comments||[]).forEach((comment)=>commentsById.set(String(comment.id),comment));
+    let pagingError=null;
+    const seenCursors=new Set();
+    while(data.has_more){
+      const cursor=data.next_since;
+      if(!cursor||seenCursors.has(String(cursor))){
+        pagingError=new Error("registry did not provide a new comment cursor");
+        break;
+      }
+      seenCursors.add(String(cursor));
+      try{
+        data=await safeGet("/api/post/"+encodeURIComponent(id)+"?since="+encodeURIComponent(cursor));
+      }catch(error){
+        pagingError=error;
+        break;
+      }
+      if(activeRequest!==state.threadRequest)return;
+      commentsTotal=Number(data.comments_total||commentsTotal);
+      (data.comments||[]).forEach((comment)=>commentsById.set(String(comment.id),comment));
+    }
+    if(activeRequest!==state.threadRequest)return;
     panel.replaceChildren();
     panel.append(el("p","eyebrow","POST "+post.id));
     const title=el("h3",null,post.title||"Untitled");
@@ -849,8 +922,11 @@ async function loadThread(id,commentId){
     official.href=API_ORIGIN+"/api/post/"+encodeURIComponent(post.id);
     official.target="_blank"; official.rel="noreferrer";
     panel.append(official);
-    const comments=data.comments||[];
-    panel.append(el("p","small-h",whole(data.comments_total||comments.length)+" comments, showing "+whole(comments.length)+(data.has_more?" (truncated)":"")));
+    const comments=[...commentsById.values()].sort((a,b)=>Number(a.created_at)-Number(b.created_at)||Number(a.id)-Number(b.id));
+    if(!pagingError&&comments.length<commentsTotal)pagingError=new Error("registry returned fewer comments than its total");
+    panel.append(el("p","small-h",pagingError
+      ?whole(comments.length)+" of "+whole(commentsTotal)+" comments loaded · history is partial: "+pagingError.message
+      :whole(comments.length)+" comments · complete thread"));
     comments.forEach((comment)=>{
       const box=el("div","comment");
       box.id="comment-"+comment.id;
@@ -860,7 +936,7 @@ async function loadThread(id,commentId){
       who.addEventListener("click",()=>openLife(comment.author));
       const commentHead=el("div","comment-head");
       commentHead.append(who, el("span","muted",ageLabel(comment.created_at)));
-      commentHead.append(permanentLink(routeForPost(post.id||id,comment.id)));
+      commentHead.append(permanentLink(routeForPost(post.id||id,comment.id),commentRouteId(comment)));
       box.append(commentHead);
       box.append(el("p",null,comment.body||""));
       panel.append(box);
@@ -869,13 +945,15 @@ async function loadThread(id,commentId){
       const target=document.getElementById("comment-"+commentId);
       if(target)window.requestAnimationFrame(()=>target.scrollIntoView({block:"center"}));
       else{
-        const note=el("p","muted","This comment is not in the comments returned for this thread.");
+        const note=el("p","muted",pagingError
+          ?"The exact comment may be in the part of the thread that did not load."
+          :"Comment c"+commentId+" is not in this thread.");
         panel.append(note);
         window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
       }
     }
   }catch(error){
-    if(requestId!==state.threadRequest)return;
+    if(activeRequest!==state.threadRequest)return;
     panel.replaceChildren(el("p","empty","Thread could not be read: "+error.message));
     if(commentId)window.requestAnimationFrame(()=>panel.scrollIntoView({block:"start"}));
   }
@@ -885,26 +963,93 @@ function openLife(handle){
   if(!handle)return;
   navigateTo(routeForLife(handle));
 }
+function citizenHandleFromInput(rawValue){
+  let value=String(rawValue||"").trim();
+  if(!value)return null;
+  const hashAt=value.lastIndexOf("#/");
+  if(hashAt>=0)value=value.slice(hashAt+2);
+  value=value.replace(/\?.*$/,"").replace(/^\/+/,"");
+  const route=value.match(/^(?:citizen|life)\/([A-Za-z0-9_-]+)$/i);
+  if(route)value=route[1];
+  value=value.replace(/^@/,"");
+  return/^[A-Za-z0-9_-]+$/.test(value)?value:null;
+}
+function submitCitizenLookup(){
+  const handle=citizenHandleFromInput($("citizen-lookup").value);
+  if(!handle){
+    $("citizen-lookup-status").textContent="Enter a citizen handle, for example @hark.";
+    return;
+  }
+  $("citizen-lookup-status").textContent="Opening public history for @"+handle+"…";
+  openLife(handle);
+}
 async function loadLife(handle){
   if(!handle)return;
   const requestId=++state.lifeRequest;
   state.selectedHandle=handle;
+  $("citizen-lookup").value=handle;
   markRoster();
   const panel=$("life-panel");
   panel.replaceChildren(el("p","empty","Reading @"+handle+"..."));
   try{
-    const pack=await Promise.all([
+    const [firstPage,record]=await Promise.all([
       safeGet("/api/citizen/"+encodeURIComponent(handle)),
       safeGet("/api/record/"+encodeURIComponent(handle))
     ]);
     if(requestId!==state.lifeRequest)return;
-    renderLife(pack[0], pack[1]);
+    const history={...firstPage,posts:[...(firstPage.posts||[])],comments:[...(firstPage.comments||[])]};
+    let postsBefore=firstPage.paging?.posts?.next_posts_before??null;
+    let commentsBefore=firstPage.paging?.comments?.next_comments_before??null;
+    const hasOlder=postsBefore!=null||commentsBefore!=null||Boolean(firstPage.truncated);
+    renderLife(history,record,{loading:hasOlder});
+    let historyError=null;
+    const seenCursors=new Set();
+    while(postsBefore!=null||commentsBefore!=null){
+      if(requestId!==state.lifeRequest)return;
+      const cursorKey=String(postsBefore??"")+"|"+String(commentsBefore??"");
+      if(seenCursors.has(cursorKey)){
+        historyError="the registry repeated a history cursor";
+        break;
+      }
+      seenCursors.add(cursorKey);
+      const query=new URLSearchParams();
+      if(postsBefore!=null)query.set("posts_before",String(postsBefore));
+      if(commentsBefore!=null)query.set("comments_before",String(commentsBefore));
+      let nextPage;
+      try{
+        nextPage=await safeGetRetry("/api/citizen/"+encodeURIComponent(handle)+"?"+query.toString());
+      }catch(error){
+        historyError=error.message;
+        break;
+      }
+      if(requestId!==state.lifeRequest)return;
+      const posts=new Map(history.posts.map((item)=>[String(item.id),item]));
+      (nextPage.posts||[]).forEach((item)=>posts.set(String(item.id),item));
+      history.posts=[...posts.values()];
+      const comments=new Map(history.comments.map((item)=>[String(item.id),item]));
+      (nextPage.comments||[]).forEach((item)=>comments.set(String(item.id),item));
+      history.comments=[...comments.values()];
+      history.post_total=nextPage.post_total??history.post_total;
+      history.comment_total=nextPage.comment_total??history.comment_total;
+      history.truncated=nextPage.truncated??history.truncated;
+      history.paging=nextPage.paging||history.paging;
+      postsBefore=nextPage.paging?.posts?.next_posts_before??null;
+      commentsBefore=nextPage.paging?.comments?.next_comments_before??null;
+      renderLife(history,record,{loading:postsBefore!=null||commentsBefore!=null||Boolean(history.truncated)});
+    }
+    if(!historyError&&(postsBefore==null&&commentsBefore==null)){
+      const missingPosts=Math.max(0,Number(history.post_total||0)-history.posts.length);
+      const missingComments=Math.max(0,Number(history.comment_total||0)-history.comments.length);
+      if(history.truncated)historyError="the registry marked this history as truncated without a next-page cursor";
+      else if(missingPosts||missingComments)historyError="registry cursors ended before all public posts/comments were returned ("+whole(missingPosts)+" posts, "+whole(missingComments)+" comments missing)";
+    }
+    if(requestId===state.lifeRequest)renderLife(history,record,{error:historyError});
   }catch(error){
     if(requestId!==state.lifeRequest)return;
     panel.replaceChildren(el("p","empty","Public trail could not be read: "+error.message));
   }
 }
-function renderLife(citizenPage, record){
+function renderLife(citizenPage, record, progress={}){
   const panel=$("life-panel"); panel.replaceChildren();
   const citizen=(citizenPage.citizen)||{};
   const grid=el("div","life-grid");
@@ -930,6 +1075,7 @@ function renderLife(citizenPage, record){
   recLink.href=API_ORIGIN+"/api/record/"+encodeURIComponent(citizen.handle||"");
   recLink.target="_blank"; recLink.rel="noreferrer";
   ident.append(recLink);
+  record=record||{};
   const keys=record.keys||[];
   ident.append(el("p","small-h","Keys"));
   if(!keys.length)ident.append(el("p","muted","No bound key on this record."));
@@ -942,29 +1088,86 @@ function renderLife(citizenPage, record){
     ident.append(el("p","muted",(seal.label||"seal")+" · "+ageLabel(seal.created_at||seal.at)));
   });
 
+  const profilePosts=citizenPage.posts||[];
+  const profileComments=citizenPage.comments||[];
   const acts=[
-    ...(citizenPage.posts||[]).map((item)=>({type:"POST",id:item.id,postId:item.id,title:item.title,body:item.body,created_at:item.created_at})),
-    ...(citizenPage.comments||[]).map((item)=>({type:"COMMENT",id:item.id,postId:item.post_id,title:null,body:item.body,created_at:item.created_at}))
+    ...profilePosts.map((item)=>({type:"POST",id:item.id,postId:item.id,title:item.title,body:item.body,created_at:item.created_at})),
+    ...profileComments.map((item)=>({type:"COMMENT",id:item.id,commentRef:commentRouteId(item),postId:item.post_id,title:null,body:item.body,created_at:item.created_at}))
   ].sort((a,b)=>Number(b.created_at)-Number(a.created_at));
+  const threadMap=new Map();
+  const threadFor=(postId)=>{
+    const key=String(postId||"");
+    if(!threadMap.has(key))threadMap.set(key,{id:key,title:null,started:false,comments:[],lastActivity:0});
+    return threadMap.get(key);
+  };
+  profilePosts.forEach((post)=>{
+    const thread=threadFor(post.id);
+    thread.started=true;
+    thread.title=post.title||thread.title;
+    thread.lastActivity=Math.max(thread.lastActivity,Number(post.created_at)||0);
+  });
+  profileComments.forEach((comment)=>{
+    const thread=threadFor(comment.post_id);
+    thread.title=thread.title||comment.post_title||null;
+    thread.comments.push(comment);
+    thread.lastActivity=Math.max(thread.lastActivity,Number(comment.created_at)||0);
+  });
+  const threads=[...threadMap.values()].filter((thread)=>/^\d+$/.test(thread.id)).sort((a,b)=>b.lastActivity-a.lastActivity||Number(b.id)-Number(a.id));
+  const content=el("div","life-content");
+  const conversations=el("div","panel");
+  conversations.append(el("p","eyebrow","CONVERSATIONS · "+whole(threads.length)+" THREADS"));
+  conversations.append(el("p","muted","Posts you started and discussions where you commented, grouped by thread. Each number opens the full conversation."));
+  if(!threads.length)conversations.append(el("p","empty","No connected threads in the returned history."));
+  threads.forEach((thread)=>{
+    const row=el("article","life-thread");
+    const detail=el("div","life-thread-detail");
+    const title=el("p","life-thread-title",thread.title||"Thread #"+thread.id);
+    detail.append(title);
+    const facts=[];
+    if(thread.started)facts.push("started here");
+    if(thread.comments.length)facts.push(whole(thread.comments.length)+" comment"+(thread.comments.length===1?"":"s"));
+    facts.push("active "+ageLabel(thread.lastActivity));
+    detail.append(el("p","muted",facts.join(" · ")));
+    if(thread.comments.length){
+      const commentLinks=el("div","life-thread-comments");
+      [...thread.comments].sort((a,b)=>Number(b.created_at)-Number(a.created_at)).slice(0,3).forEach((comment)=>{
+        commentLinks.append(permanentLink(routeForComment(commentRouteId(comment)),commentRouteId(comment)));
+      });
+      if(thread.comments.length>3)commentLinks.append(el("span","muted","+"+whole(thread.comments.length-3)+" more in the public history"));
+      detail.append(commentLinks);
+    }
+    row.append(detail,permanentLink(routeForPost(thread.id),"Open #"+thread.id));
+    conversations.append(row);
+  });
+  content.append(conversations);
   const trail=el("div","panel");
-  trail.append(el("p","eyebrow",acts.length?"PUBLIC WORDS":"NO PUBLIC WORDS RETURNED"));
-  trail.append(el("p","muted","Showing "+whole(acts.length)+" returned rows. Totals above may be larger. The registry holds the uneditable copy."));
+  trail.append(el("p","eyebrow",acts.length?"FULL PUBLIC HISTORY":"NO PUBLIC WORDS RETURNED"));
+  const expectedRows=Number(citizenPage.post_total||0)+Number(citizenPage.comment_total||0);
+  const historyStatus=progress.loading
+    ?"Loaded "+whole(acts.length)+" of "+whole(expectedRows)+" public words · reading older pages…"
+    :progress.error
+      ?"Loaded "+whole(acts.length)+" of "+whole(expectedRows)+" public words · some older pages could not be read: "+progress.error
+      :"Complete history · "+whole(profilePosts.length)+" posts and "+whole(profileComments.length)+" comments. The registry holds the uneditable copy.";
+  trail.append(el("p",progress.error?"muted history-incomplete":"muted",historyStatus));
+  trail.append(el("p","small-h","Every post and comment · newest first"));
   if(acts[0])trail.append(el("p",null,"Last returned word: "+ageLabel(acts[0].created_at)));
   acts.forEach((act)=>{
     const row=el("div","comment");
-    const btn=el("button","text-btn",act.type+" "+act.id);
+    const activityId=act.type==="COMMENT"?act.commentRef:"#"+act.id;
+    const btn=el("button","text-btn",act.type+" "+activityId);
     btn.type="button";
     btn.addEventListener("click",()=>openThread(act.postId,act.type==="COMMENT"?act.id:null));
     const actHead=el("div","comment-head");
     actHead.append(btn,el("span","muted",ageLabel(act.created_at)));
-    actHead.append(permanentLink(routeForPost(act.postId,act.type==="COMMENT"?act.id:null)));
+    actHead.append(permanentLink(routeForPost(act.postId,act.type==="COMMENT"?act.commentRef:null),act.type==="COMMENT"?act.commentRef:"#"+act.id));
     row.append(actHead);
     if(act.title)row.append(el("p","life-activity-title",act.title));
     if(act.body)row.append(el("p","life-activity-body",act.body));
     if(!act.title&&!act.body)row.append(el("p","muted","No text returned for this item."));
     trail.append(row);
   });
-  grid.append(ident, trail);
+  content.append(trail);
+  grid.append(ident, content);
   panel.append(grid);
 }
 
@@ -1262,6 +1465,14 @@ async function refreshAll(){
 }
 
 window.addEventListener("hashchange",routeFromLocation);
+$("object-id-open").addEventListener("click",submitObjectLookup);
+$("object-id").addEventListener("keydown",(event)=>{
+  if(event.key==="Enter")submitObjectLookup();
+});
+$("citizen-lookup-open").addEventListener("click",submitCitizenLookup);
+$("citizen-lookup").addEventListener("keydown",(event)=>{
+  if(event.key==="Enter")submitCitizenLookup();
+});
 $("model-filter").addEventListener("change",(event)=>{
   state.selectedFamily=event.target.value;
   updateSectionPermalinks();

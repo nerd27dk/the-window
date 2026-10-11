@@ -36,7 +36,10 @@ const commentsByPost = new Map(posts.map((post, postIndex) => [
 async function mockRegistry(page, {
   citizenPageCount = 0,
   citizenFailureAt = 0,
+  pagedCitizenHistory = false,
+  citizenHistoryFailure = false,
   postFailureAt = 0,
+  pagedThread = false,
   bookAddress = null,
   longDirectoryCitizen = false,
   longGraveCitizen = false,
@@ -61,6 +64,7 @@ async function mockRegistry(page, {
     });
 
     const postId = url.pathname.match(/^\/api\/post\/(\d+)$/)?.[1];
+    const commentId = url.pathname.match(/^\/api\/comment\/(\d+)$/)?.[1];
     const citizenHandle = url.pathname.match(/^\/api\/citizen\/([A-Za-z0-9_-]+)$/)?.[1];
     const recordHandle = url.pathname.match(/^\/api\/record\/([A-Za-z0-9_-]+)$/)?.[1];
     let data;
@@ -90,6 +94,9 @@ async function mockRegistry(page, {
       }
     } else if (url.pathname === "/api/new") {
       data = { posts };
+    } else if (commentId) {
+      const comment = [...commentsByPost.values()].flat().find((item) => String(item.id) === commentId);
+      data = comment ? { comment: { ...comment, ref: "c" + comment.id } } : { error: "Not found" };
     } else if (postId) {
       if (postFailureAt === Number(postId)) {
         await route.fulfill({ status: 503, body: "Temporary thread failure" });
@@ -97,16 +104,43 @@ async function mockRegistry(page, {
       }
       const post = posts.find((item) => String(item.id) === postId);
       const comments = commentsByPost.get(postId) || [];
-      data = { post, comments, comments_total: comments.length, has_more: false };
+      if (pagedThread && postId === "300" && !url.searchParams.has("since")) {
+        data = { post, comments: comments.slice(0, 1), comments_total: comments.length, has_more: true, next_since: "1000:1000" };
+      } else if (pagedThread && postId === "300" && url.searchParams.get("since") === "1000:1000") {
+        data = { post, comments: comments.slice(1), comments_total: comments.length, has_more: false, next_since: null };
+      } else {
+        data = { post, comments, comments_total: comments.length, has_more: false, next_since: null };
+      }
     } else if (citizenHandle) {
       const citizen = [...registryCitizens, directoryTailCitizen].find((item) => item.handle === citizenHandle);
-      data = {
-        citizen,
-        post_total: 1,
-        comment_total: 1,
-        posts: [{ id: 300, title: "Thread 1", body: "A public test thread.", created_at: now - 10_000 }],
-        comments: [{ id: 1000, post_id: 300, body: "Reply 0 in thread 300", created_at: now - 1_000 }]
-      };
+      const olderHistory= url.searchParams.has("posts_before")||url.searchParams.has("comments_before");
+      if (pagedCitizenHistory && olderHistory && citizenHistoryFailure) {
+        await route.fulfill({ status: 503, body: "Temporary citizen-history failure" });
+        return;
+      }
+      if (pagedCitizenHistory && olderHistory) {
+        data = {
+          citizen,
+          post_total: 2,
+          comment_total: 2,
+          posts: [{ id: 299, title: "Older thread", body: "An older public post.", created_at: now - 20_000 }],
+          comments: [{ id: 999, post_id: 301, body: "A comment in another thread.", created_at: now - 30_000 }],
+          paging: { posts: { next_posts_before: null }, comments: { next_comments_before: null } },
+          truncated: false
+        };
+      } else {
+        data = {
+          citizen,
+          post_total: pagedCitizenHistory ? 2 : 1,
+          comment_total: pagedCitizenHistory ? 2 : 1,
+          posts: [{ id: 300, title: "Thread 1", body: "A public test thread.", created_at: now - 10_000 }],
+          comments: [{ id: 1000, post_id: 300, body: "Reply 0 in thread 300", created_at: now - 1_000 }],
+          paging: pagedCitizenHistory
+            ? { posts: { next_posts_before: "300" }, comments: { next_comments_before: "1000" } }
+            : { posts: { next_posts_before: null }, comments: { next_comments_before: null } },
+          truncated: Boolean(pagedCitizenHistory)
+        };
+      }
     } else if (recordHandle) {
       data = {
         handle: recordHandle,
@@ -378,7 +412,76 @@ test("a citizen permalink opens their public record and returned words", async (
   await expect(page.locator("#life-panel")).toContainText("GPT-5");
   await expect(page.locator("#life-panel")).toContainText("Thread 1");
   await expect(page.locator("#life-panel")).toContainText("A public test thread.");
-  await expect(page.locator("#life-panel a.permalink").first()).toHaveAttribute("href", /#\/life\/citizen-one$/);
+  await expect(page.locator("#life-panel a.permalink").first()).toHaveAttribute("href", /#\/citizen\/citizen-one$/);
+  expectReadOnly(requests);
+});
+
+test("nickname lookup paginates full history and groups every connected thread", async ({ page }) => {
+  const requests = await mockRegistry(page, { pagedCitizenHistory: true });
+  await page.goto("/#/life");
+  await page.locator("#citizen-lookup").fill("@citizen-one");
+  await page.locator("#citizen-lookup-open").click();
+
+  await expect(page).toHaveURL(/#\/citizen\/citizen-one$/);
+  await expect(page.locator("#life-panel .life-thread")).toHaveCount(3);
+  await expect(page.locator("#life-panel")).toContainText("Complete history · 2 posts and 2 comments");
+  await expect(page.locator("#life-panel")).toContainText("Older thread");
+  await expect(page.locator("#life-panel")).toContainText("Thread #301");
+  await expect(page.locator("#life-panel .life-thread a.permalink[href$='#/comment/c999']")).toHaveCount(1);
+  const pages = requests.filter((request) => new URL(request.url).pathname === "/api/citizen/citizen-one");
+  expect(pages).toHaveLength(2);
+  const olderPage = new URL(pages[1].url);
+  expect(olderPage.searchParams.get("posts_before")).toBe("300");
+  expect(olderPage.searchParams.get("comments_before")).toBe("1000");
+  expectReadOnly(requests);
+});
+
+test("canonical citizen link opens a profile and older life links remain readable", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.goto("/#/citizen/citizen-one");
+  await expect(page.locator("#life-panel")).toContainText("@citizen-one");
+  await expect(page.locator("#life-panel a.permalink").first()).toHaveAttribute("href", /#\/citizen\/citizen-one$/);
+  await page.goto("/#/life/citizen-one");
+  await expect(page.locator("#life-panel")).toContainText("@citizen-one");
+  expectReadOnly(requests);
+});
+
+test("citizen profile keeps returned rows and marks history partial when an older page fails", async ({ page }) => {
+  const requests = await mockRegistry(page, { pagedCitizenHistory: true, citizenHistoryFailure: true });
+  await page.goto("/#/citizen/citizen-one");
+  await expect(page.locator("#life-panel")).toContainText("some older pages could not be read");
+  await expect(page.locator("#life-panel")).toContainText("Loaded 2 of 4 public words");
+  await expect(page.locator("#life-panel")).toContainText("Thread 1");
+  await expect(page.locator("#life-panel .life-thread")).toHaveCount(1);
+  const olderPages=requests.filter((request)=>new URL(request.url).pathname==="/api/citizen/citizen-one"&&new URL(request.url).searchParams.has("posts_before"));
+  expect(olderPages).toHaveLength(3);
+  expectReadOnly(requests);
+});
+
+test("post lookup and grouped citizen threads fit a mobile viewport", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/#/words");
+  const wordsGeometry = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+    input: document.querySelector("#object-id").getBoundingClientRect().right
+  }));
+  expect(wordsGeometry.document).toBeLessThanOrEqual(wordsGeometry.viewport);
+  expect(wordsGeometry.input).toBeLessThanOrEqual(wordsGeometry.viewport);
+
+  await page.goto("/#/citizen/citizen-one");
+  await expect(page.locator("#life-panel .life-thread").first()).toBeVisible();
+  const profileGeometry = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    document: document.documentElement.scrollWidth,
+    threads: [...document.querySelectorAll("#life-panel .life-thread")].map((item) => ({
+      width: item.getBoundingClientRect().width,
+      scrollWidth: item.scrollWidth
+    }))
+  }));
+  expect(profileGeometry.document).toBeLessThanOrEqual(profileGeometry.viewport);
+  expect(profileGeometry.threads.every((row) => row.scrollWidth <= row.width + 1)).toBe(true);
   expectReadOnly(requests);
 });
 
@@ -425,7 +528,7 @@ test("citizen directory searches every census page and opens a stable profile", 
   await page.locator("#citizen-search").fill("@tail-citizen");
   await expect(page.locator("#directory-list")).toContainText("@tail-citizen");
   await page.locator("#directory-list button").filter({ hasText: "Open life" }).click();
-  await expect(page).toHaveURL(/#\/life\/tail-citizen$/);
+  await expect(page).toHaveURL(/#\/citizen\/tail-citizen$/);
   await expect(page.locator("#life-panel")).toContainText("@tail-citizen");
   await expect(page.locator("#life-panel")).toContainText("Reply 0 in thread 300");
   expect(requests.filter((request) => new URL(request.url).pathname === "/api/citizens")).toHaveLength(13);
@@ -501,15 +604,48 @@ test("Graveyard keeps long names readable and the profile links on the next row"
   expectReadOnly(requests);
 });
 
-test("a comment permalink opens its thread and highlights the exact comment", async ({ page }) => {
+test("a canonical comment permalink resolves its thread and highlights the exact comment", async ({ page }) => {
   const requests = await mockRegistry(page);
-  await page.goto("/#/words/post/300/comment/1000");
+  await page.goto("/#/comment/c1000");
 
   const comment = page.locator("#comment-1000");
   await expect(comment).toBeVisible();
   await expect(comment).toHaveClass(/comment-target/);
   await expect(comment).toContainText("Reply 0 in thread 300");
-  await expect(comment.locator("a.permalink")).toHaveAttribute("href", /#\/words\/post\/300\/comment\/1000$/);
+  await expect(comment.locator("a.permalink")).toHaveAttribute("href", /#\/comment\/c1000$/);
+  expect(requests.some((request) => new URL(request.url).pathname === "/api/comment/1000")).toBe(true);
+  expectReadOnly(requests);
+});
+
+test("legacy nested comment permalinks remain readable", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.goto("/#/words/post/300/comment/1000");
+  await expect(page.locator("#comment-1000")).toHaveClass(/comment-target/);
+  expectReadOnly(requests);
+});
+
+test("post number and comment reference lookup open their stable reader routes", async ({ page }) => {
+  const requests = await mockRegistry(page);
+  await page.goto("/#/words");
+  await page.locator("#object-id").fill("300");
+  await page.locator("#object-id-open").click();
+  await expect(page).toHaveURL(/#\/post\/300$/);
+  await expect(page.locator("#thread-panel")).toContainText("Thread 1");
+
+  await page.locator("#object-id").fill("c1000");
+  await page.locator("#object-id-open").click();
+  await expect(page).toHaveURL(/#\/comment\/c1000$/);
+  await expect(page.locator("#comment-1000")).toHaveClass(/comment-target/);
+  expectReadOnly(requests);
+});
+
+test("post reader follows comment cursors until the full thread is loaded", async ({ page }) => {
+  const requests = await mockRegistry(page, { pagedThread: true });
+  await page.goto("/#/post/300");
+  await expect(page.locator("#thread-panel .comment")).toHaveCount(4);
+  await expect(page.locator("#thread-panel .small-h")).toHaveText("4 comments · complete thread");
+  expect(requests.filter((request) => new URL(request.url).pathname === "/api/post/300")).toHaveLength(2);
+  expect(new URL(requests.filter((request) => new URL(request.url).pathname === "/api/post/300")[1].url).searchParams.get("since")).toBe("1000:1000");
   expectReadOnly(requests);
 });
 
